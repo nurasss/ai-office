@@ -42,6 +42,22 @@
             font-size: 13px;
             margin-left: 8px;
         }
+        .header .nav-link {
+            margin-left: auto;
+            color: #c4b5fd;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 600;
+            border: 1px solid #4c3b78;
+            border-radius: 8px;
+            padding: 7px 10px;
+            background: rgba(42, 27, 74, 0.55);
+        }
+        .header .nav-link:hover {
+            color: #fff;
+            border-color: #7c3aed;
+            background: #2a1b4a;
+        }
 
         /* ── Main layout ────────────────────────────────────────── */
         .main {
@@ -259,6 +275,11 @@
                 font-size: 12px;
                 line-height: 1.25;
             }
+            .header .nav-link {
+                margin-left: auto;
+                padding: 6px 9px;
+                font-size: 12px;
+            }
 
             .main {
                 flex-direction: column;
@@ -450,6 +471,7 @@
     <h1>🏢 AI Office</h1>
     <span class="badge">v1.0</span>
     <span class="tagline">Цифровой офис с 7 ИИ-агентами</span>
+    <a class="nav-link" href="/simulator">Симулятор</a>
 </div>
 
 <div class="main">

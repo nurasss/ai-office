@@ -122,6 +122,16 @@ async def index(request: Request):
     )
 
 
+@app.get("/simulator", response_class=HTMLResponse)
+async def simulator(request: Request):
+    """Интерактивная демонстрация цикла LangGraph."""
+    return templates.TemplateResponse(
+        request=request,
+        name="simulator.html",
+        context={},
+    )
+
+
 # ── API: отправка сообщения агенту ───────────────────────────────────
 @app.post("/api/chat")
 async def chat(request: Request):

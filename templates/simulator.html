@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Office — Симулятор LangGraph</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f0f23;
+            color: #e5e7eb;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+        .header {
+            min-height: 62px;
+            background: linear-gradient(135deg, #1a1a3e 0%, #2d1b69 100%);
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 24px;
+        }
+        .header h1 {
+            font-size: 20px;
+            line-height: 1.2;
+        }
+        .badge {
+            background: #4ade80;
+            color: #000;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 700;
+        }
+        .header p {
+            color: #8b8aa0;
+            font-size: 13px;
+        }
+        .nav-link {
+            margin-left: auto;
+            color: #c4b5fd;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 700;
+            border: 1px solid #4c3b78;
+            border-radius: 8px;
+            padding: 7px 10px;
+            background: rgba(42, 27, 74, 0.55);
+        }
+        .nav-link:hover {
+            color: #fff;
+            border-color: #7c3aed;
+            background: #2a1b4a;
+        }
+
+        .shell {
+            min-height: calc(100dvh - 62px);
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 0;
+        }
+
+        .stage {
+            padding: 22px;
+            border-right: 1px solid #2a2a4a;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .toolbar {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) 260px auto;
+            gap: 12px;
+            align-items: end;
+            margin-bottom: 20px;
+        }
+        .field label,
+        .slider-control label {
+            display: block;
+            color: #8b8aa0;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .task-input {
+            width: 100%;
+            min-height: 42px;
+            border: 1px solid #333;
+            border-radius: 8px;
+            background: #0d0d1f;
+            color: #e5e7eb;
+            padding: 10px 12px;
+            font: inherit;
+            font-size: 14px;
+        }
+        .task-input:focus {
+            outline: none;
+            border-color: #7c3aed;
+        }
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #7c3aed;
+        }
+        .score {
+            min-width: 42px;
+            text-align: right;
+            color: #c4b5fd;
+            font-weight: 700;
+        }
+        .run-btn {
+            min-height: 42px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #6d28d9, #7c3aed);
+            color: #fff;
+            font-size: 14px;
+            font-weight: 800;
+            padding: 0 18px;
+            cursor: pointer;
+        }
+        .run-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .graph-wrap {
+            flex: 1;
+            min-height: 470px;
+            position: relative;
+            border: 1px solid #262645;
+            border-radius: 8px;
+            background: #111126;
+            overflow: hidden;
+        }
+        .graph {
+            position: absolute;
+            inset: 0;
+        }
+        .node {
+            position: absolute;
+            width: 178px;
+            min-height: 82px;
+            border: 1px solid #343456;
+            border-radius: 8px;
+            background: #181832;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 4px;
+            padding: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+            transition: border-color 0.2s, background 0.2s, transform 0.2s;
+        }
+        .node.active {
+            border-color: #a78bfa;
+            background: #2a1b4a;
+            transform: translateY(-2px);
+        }
+        .node.done {
+            border-color: #4ade80;
+            background: #123125;
+        }
+        .node-icon {
+            font-size: 22px;
+        }
+        .node-title {
+            font-weight: 800;
+            font-size: 14px;
+        }
+        .node-subtitle {
+            color: #8b8aa0;
+            font-size: 12px;
+        }
+        .user-node { left: 6%; top: 42%; }
+        .pmo-node { left: 35%; top: 18%; }
+        .copywriter-node { left: 35%; top: 66%; }
+        .done-node { right: 6%; top: 42%; }
+
+        svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .edge {
+            stroke: #4b4b6b;
+            stroke-width: 3;
+            fill: none;
+            marker-end: url(#arrow);
+        }
+        .edge.active {
+            stroke: #a78bfa;
+        }
+        .edge.reject.active {
+            stroke: #fb7185;
+        }
+        .token {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #4ade80;
+            border: 3px solid #d1fae5;
+            box-shadow: 0 0 22px rgba(74, 222, 128, 0.8);
+            left: calc(6% + 80px);
+            top: calc(42% + 32px);
+            transform: translate(-50%, -50%);
+            transition: left 0.65s ease, top 0.65s ease;
+        }
+
+        .side {
+            background: #15152b;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .panel {
+            padding: 18px;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .panel h2 {
+            font-size: 15px;
+            margin-bottom: 12px;
+        }
+        .state-grid {
+            display: grid;
+            gap: 10px;
+        }
+        .state-row {
+            display: grid;
+            grid-template-columns: 112px minmax(0, 1fr);
+            gap: 10px;
+            font-size: 13px;
+        }
+        .state-key {
+            color: #8b8aa0;
+        }
+        .state-value {
+            color: #f3f4f6;
+            overflow-wrap: anywhere;
+        }
+        .log {
+            flex: 1;
+            min-height: 180px;
+            overflow-y: auto;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .log-item {
+            border-left: 3px solid #4c3b78;
+            padding: 8px 10px;
+            background: #101024;
+            border-radius: 0 8px 8px 0;
+            font-size: 13px;
+            line-height: 1.4;
+            color: #d1d5db;
+        }
+        .log-item.good {
+            border-left-color: #4ade80;
+        }
+        .log-item.warn {
+            border-left-color: #fb7185;
+        }
+
+        @media (max-width: 900px) {
+            .header {
+                padding: 12px 14px;
+                flex-wrap: wrap;
+            }
+            .header h1 {
+                font-size: 18px;
+            }
+            .header p {
+                flex-basis: 100%;
+                order: 3;
+            }
+            .shell {
+                grid-template-columns: 1fr;
+            }
+            .stage {
+                border-right: none;
+                border-bottom: 1px solid #2a2a4a;
+                padding: 14px;
+            }
+            .toolbar {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            .graph-wrap {
+                min-height: 520px;
+            }
+            .node {
+                width: 142px;
+                min-height: 74px;
+                padding: 10px;
+            }
+            .node-title {
+                font-size: 12px;
+            }
+            .node-subtitle {
+                font-size: 11px;
+            }
+            .user-node { left: 6%; top: 8%; }
+            .pmo-node { left: 57%; top: 8%; }
+            .copywriter-node { left: 6%; top: 58%; }
+            .done-node { left: 57%; top: 58%; }
+            .token {
+                left: calc(6% + 68px);
+                top: calc(8% + 30px);
+            }
+            .side {
+                min-height: 420px;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .header p {
+                display: none;
+            }
+            .nav-link {
+                padding: 6px 8px;
+            }
+            .graph-wrap {
+                min-height: 480px;
+            }
+            .node {
+                width: 132px;
+            }
+            .state-row {
+                grid-template-columns: 96px minmax(0, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+<header class="header">
+    <h1>🏢 AI Office</h1>
+    <span class="badge">LangGraph</span>
+    <p>Интерактивная схема автономного цикла PMO → Исполнитель → Проверка</p>
+    <a class="nav-link" href="/">Чат</a>
+</header>
+
+<main class="shell">
+    <section class="stage">
+        <div class="toolbar">
+            <div class="field">
+                <label for="taskInput">Задача</label>
+                <input class="task-input" id="taskInput" value="Напиши приветствие для нового ИИ-сотрудника">
+            </div>
+            <div class="slider-control">
+                <label for="qualityRange">Качество работы исполнителя</label>
+                <div class="slider-row">
+                    <input type="range" min="0" max="100" value="85" id="qualityRange">
+                    <span class="score" id="qualityValue">85</span>
+                </div>
+            </div>
+            <button class="run-btn" id="runBtn">Запустить задачу</button>
+        </div>
+
+        <div class="graph-wrap">
+            <svg viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                        <path d="M0,0 L0,6 L9,3 z" fill="#a78bfa"></path>
+                    </marker>
+                </defs>
+                <path class="edge" data-edge="user-pmo" d="M150 280 C260 220 300 140 420 130"></path>
+                <path class="edge" data-edge="pmo-copywriter" d="M500 205 C520 300 520 360 500 430"></path>
+                <path class="edge reject" data-edge="copywriter-pmo" d="M410 430 C340 350 340 220 410 205"></path>
+                <path class="edge" data-edge="pmo-done" d="M560 160 C680 220 760 270 860 280"></path>
+            </svg>
+
+            <div class="node user-node" data-node="user">
+                <span class="node-icon">👤</span>
+                <span class="node-title">User</span>
+                <span class="node-subtitle">ставит задачу</span>
+            </div>
+            <div class="node pmo-node" data-node="pmo">
+                <span class="node-icon">📋</span>
+                <span class="node-title">PMO</span>
+                <span class="node-subtitle">менеджер</span>
+            </div>
+            <div class="node copywriter-node" data-node="copywriter">
+                <span class="node-icon">✍️</span>
+                <span class="node-title">Copywriter</span>
+                <span class="node-subtitle">исполнитель</span>
+            </div>
+            <div class="node done-node" data-node="done">
+                <span class="node-icon">✅</span>
+                <span class="node-title">Done</span>
+                <span class="node-subtitle">работа принята</span>
+            </div>
+            <div class="token" id="token"></div>
+        </div>
+    </section>
+
+    <aside class="side">
+        <section class="panel">
+            <h2>State</h2>
+            <div class="state-grid">
+                <div class="state-row">
+                    <span class="state-key">task</span>
+                    <span class="state-value" id="stateTask">Напиши приветствие для нового ИИ-сотрудника</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-key">current_agent</span>
+                    <span class="state-value" id="stateAgent">idle</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-key">quality_score</span>
+                    <span class="state-value" id="stateQuality">85</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-key">status</span>
+                    <span class="state-value" id="stateStatus">ожидает запуска</span>
+                </div>
+            </div>
+        </section>
+        <section class="log" id="log">
+            <div class="log-item">Настройте качество и нажмите «Запустить задачу».</div>
+        </section>
+    </aside>
+</main>
+
+<script>
+    const runBtn = document.getElementById('runBtn');
+    const qualityRange = document.getElementById('qualityRange');
+    const qualityValue = document.getElementById('qualityValue');
+    const taskInput = document.getElementById('taskInput');
+    const token = document.getElementById('token');
+    const log = document.getElementById('log');
+
+    const stateEls = {
+        task: document.getElementById('stateTask'),
+        agent: document.getElementById('stateAgent'),
+        quality: document.getElementById('stateQuality'),
+        status: document.getElementById('stateStatus'),
+    };
+
+    const positions = {
+        desktop: {
+            user: ['calc(6% + 89px)', 'calc(42% + 41px)'],
+            pmo: ['calc(35% + 89px)', 'calc(18% + 41px)'],
+            copywriter: ['calc(35% + 89px)', 'calc(66% + 41px)'],
+            done: ['calc(94% - 89px)', 'calc(42% + 41px)'],
+        },
+        mobile: {
+            user: ['calc(6% + 71px)', 'calc(8% + 37px)'],
+            pmo: ['calc(57% + 71px)', 'calc(8% + 37px)'],
+            copywriter: ['calc(6% + 71px)', 'calc(58% + 37px)'],
+            done: ['calc(57% + 71px)', 'calc(58% + 37px)'],
+        },
+    };
+
+    qualityRange.addEventListener('input', () => {
+        qualityValue.textContent = qualityRange.value;
+        stateEls.quality.textContent = qualityRange.value;
+    });
+
+    taskInput.addEventListener('input', () => {
+        stateEls.task.textContent = taskInput.value || 'Без названия';
+    });
+
+    runBtn.addEventListener('click', runSimulation);
+
+    function layoutMode() {
+        return window.innerWidth <= 900 ? 'mobile' : 'desktop';
+    }
+
+    function wait(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function addLog(text, kind = '') {
+        const item = document.createElement('div');
+        item.className = `log-item ${kind}`;
+        item.textContent = text;
+        log.appendChild(item);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function setState(agent, status) {
+        stateEls.agent.textContent = agent;
+        stateEls.status.textContent = status;
+    }
+
+    function activateNode(name) {
+        document.querySelectorAll('.node').forEach(node => {
+            node.classList.toggle('active', node.dataset.node === name);
+            if (name !== 'done') node.classList.remove('done');
+        });
+        if (name === 'done') {
+            document.querySelector('[data-node="done"]').classList.add('done');
+        }
+    }
+
+    function activateEdge(name) {
+        document.querySelectorAll('.edge').forEach(edge => {
+            edge.classList.toggle('active', edge.dataset.edge === name);
+        });
+    }
+
+    async function moveTo(nodeName, edgeName = '') {
+        if (edgeName) activateEdge(edgeName);
+        const [left, top] = positions[layoutMode()][nodeName];
+        token.style.left = left;
+        token.style.top = top;
+        await wait(720);
+        activateNode(nodeName);
+        activateEdge('');
+    }
+
+    async function runSimulation() {
+        runBtn.disabled = true;
+        log.innerHTML = '';
+        document.querySelectorAll('.node').forEach(node => node.classList.remove('active', 'done'));
+        document.querySelectorAll('.edge').forEach(edge => edge.classList.remove('active'));
+
+        const quality = Number(qualityRange.value);
+        const task = taskInput.value.trim() || 'Напиши приветствие для нового ИИ-сотрудника';
+        stateEls.task.textContent = task;
+        stateEls.quality.textContent = quality;
+
+        setState('user', 'задача создана');
+        activateNode('user');
+        await moveTo('user');
+        addLog('User: задача отправлена в AI Office.');
+
+        setState('pmo', 'PMO принимает задачу');
+        await moveTo('pmo', 'user-pmo');
+        addLog('PMO: определяю исполнителя и отправляю задачу копирайтеру.');
+
+        setState('copywriter', 'исполнитель готовит draft');
+        await moveTo('copywriter', 'pmo-copywriter');
+        addLog('Copywriter: черновик подготовлен и возвращен на проверку.');
+
+        setState('pmo', 'PMO проверяет качество');
+        await moveTo('pmo', 'copywriter-pmo');
+        addLog(`PMO: quality_score = ${quality}. Порог приемки = 70.`);
+
+        if (quality < 70) {
+            setState('copywriter', 'качество ниже порога, идет повторная итерация');
+            addLog('PMO: качество низкое, нужно переделать.', 'warn');
+            await moveTo('copywriter', 'pmo-copywriter');
+            addLog('Copywriter: улучшил черновик после обратной связи.');
+
+            setState('pmo', 'PMO повторно проверяет результат');
+            await moveTo('pmo', 'copywriter-pmo');
+            addLog('PMO: повторная проверка пройдена, задача готова к завершению.', 'good');
+        } else {
+            addLog('PMO: качество достаточно высокое, работа принимается.', 'good');
+        }
+
+        setState('done', 'готово');
+        await moveTo('done', 'pmo-done');
+        addLog('Done: процесс завершен.', 'good');
+        runBtn.disabled = false;
+    }
+</script>
+</body>
+</html>
