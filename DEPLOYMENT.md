@@ -1,6 +1,6 @@
 # Деплой AI Office на GitHub + Vercel
 
-Проект является FastAPI-приложением. Для Vercel добавлен корневой `app.py`, который импортирует `web.app:app`.
+Проект является FastAPI-приложением. Для Vercel используется zero-config entrypoint `app.py`, который импортирует `web.app:app`.
 
 ## Вариант: GitHub -> Vercel
 
