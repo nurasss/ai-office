@@ -28,6 +28,16 @@ templates = Jinja2Templates(directory="templates")
 # ── Кэш агентов (lazy init) ──────────────────────────────────────────
 _agents: dict[str, object] = {}
 
+AGENT_NAMES = {
+    "pmo": "PMO",
+    "data_analyst": "Аналитик",
+    "developer": "Разработчик",
+    "copywriter": "Копирайтер",
+    "support": "Поддержка",
+    "strategist": "Стратег",
+    "accountant": "Бухгалтер",
+}
+
 
 def get_agent(agent_id: str):
     """Ленивая инициализация агентов."""
@@ -56,6 +66,34 @@ def format_error(error: Exception) -> str:
 
     message = str(error).strip()
     return message.strip('"') or error.__class__.__name__
+
+
+async def run_pmo_dispatch(message: str) -> dict[str, str]:
+    """PMO routes the task and returns the selected agent's user-facing answer."""
+    pmo = get_agent("pmo")
+    route_result = await pmo.process({
+        "current_task": message,
+        "messages": [],
+        "subtasks": [],
+    })
+
+    target_agent_id = route_result.get("active_agent", "data_analyst")
+    if target_agent_id == "pmo":
+        target_agent_id = "data_analyst"
+
+    target_agent = get_agent(target_agent_id)
+    if not target_agent:
+        raise ValueError(f"PMO выбрал неизвестного агента: {target_agent_id}")
+
+    result = await target_agent.invoke(message)
+    return {
+        "agent_id": "pmo",
+        "handled_by": target_agent_id,
+        "handled_by_name": AGENT_NAMES.get(target_agent_id, target_agent_id),
+        "result": result.get("result", ""),
+        "task_id": result.get("task_id", ""),
+        "status": "ok",
+    }
 
 
 @app.get("/health")
@@ -102,9 +140,14 @@ async def chat(request: Request):
     logger.info("web.chat", agent_id=agent_id, message=message[:100])
 
     try:
+        if agent_id == "pmo":
+            return JSONResponse(await run_pmo_dispatch(message))
+
         result = await agent.invoke(message)
         return JSONResponse({
             "agent_id": agent_id,
+            "handled_by": agent_id,
+            "handled_by_name": AGENT_NAMES.get(agent_id, agent_id),
             "result": result.get("result", ""),
             "task_id": result.get("task_id", ""),
             "status": "ok",

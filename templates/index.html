@@ -522,6 +522,26 @@
         accountant: 'OpenAI GPT-4o mini → GPT-4o',
     };
 
+    const agentNames = {
+        pmo: 'PMO',
+        data_analyst: 'Аналитик',
+        developer: 'Разработчик',
+        copywriter: 'Копирайтер',
+        support: 'Поддержка',
+        strategist: 'Стратег',
+        accountant: 'Бухгалтер',
+    };
+
+    const agentIcons = {
+        pmo: '📋',
+        data_analyst: '📊',
+        developer: '💻',
+        copywriter: '✍️',
+        support: '🎧',
+        strategist: '🎯',
+        accountant: '🧮',
+    };
+
     function selectAgent(id, name, icon) {
         currentAgent = id;
         currentAgentName = name;
@@ -549,13 +569,13 @@
         el.style.height = Math.min(el.scrollHeight, 120) + 'px';
     }
 
-    function addMessage(role, text, meta = '') {
+    function addMessage(role, text, meta = '', avatarOverride = '') {
         const welcome = document.getElementById('welcome');
         if (welcome) welcome.remove();
 
         const div = document.createElement('div');
         div.className = `msg ${role}`;
-        const avatar = role === 'user' ? '👤' : currentIcon;
+        const avatar = avatarOverride || (role === 'user' ? '👤' : currentIcon);
         div.innerHTML = `
             <div class="avatar">${avatar}</div>
             <div>
@@ -596,7 +616,13 @@
             const data = await resp.json();
 
             if (data.status === 'ok') {
-                addMessage('agent', data.result, `task: ${data.task_id}`);
+                const handledBy = data.handled_by || currentAgent;
+                const routed = currentAgent === 'pmo' && handledBy !== 'pmo'
+                    ? `PMO → ${agentNames[handledBy] || handledBy}`
+                    : '';
+                const task = data.task_id ? `task: ${data.task_id}` : '';
+                const meta = [routed, task].filter(Boolean).join(' · ');
+                addMessage('agent', data.result, meta, agentIcons[handledBy] || '');
             } else {
                 addMessage('agent', `❌ Ошибка: ${data.error}`, '');
             }
