@@ -17,6 +17,7 @@ from agents import (
 )
 from core.llm_router import MissingLLMCredentialsError
 from core.logger import get_logger, setup_logging
+from tools.external.telegram import send_telegram_message
 
 load_dotenv()
 setup_logging("INFO")
@@ -68,7 +69,7 @@ def format_error(error: Exception) -> str:
     return message.strip('"') or error.__class__.__name__
 
 
-async def run_pmo_dispatch(message: str) -> dict[str, str]:
+async def run_pmo_dispatch(message: str) -> dict[str, object]:
     """PMO routes the task and returns the selected agent's user-facing answer."""
     pmo = get_agent("pmo")
     route_result = await pmo.process({
@@ -86,12 +87,23 @@ async def run_pmo_dispatch(message: str) -> dict[str, str]:
         raise ValueError(f"PMO выбрал неизвестного агента: {target_agent_id}")
 
     result = await target_agent.invoke(message)
+    response_text = result.get("result", "")
+    task_id = result.get("task_id", "")
+    telegram_sent = await send_telegram_message(
+        "AI Office: PMO завершил задачу\n"
+        f"Исполнитель: {AGENT_NAMES.get(target_agent_id, target_agent_id)}\n"
+        f"Task ID: {task_id}\n"
+        f"Запрос: {message[:700]}\n\n"
+        f"Результат:\n{response_text[:1800]}"
+    )
+
     return {
         "agent_id": "pmo",
         "handled_by": target_agent_id,
         "handled_by_name": AGENT_NAMES.get(target_agent_id, target_agent_id),
-        "result": result.get("result", ""),
-        "task_id": result.get("task_id", ""),
+        "result": response_text,
+        "task_id": task_id,
+        "telegram_notified": telegram_sent,
         "status": "ok",
     }
 

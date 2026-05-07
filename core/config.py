@@ -39,6 +39,8 @@ class Settings(BaseSettings):
 
     # ── External Tools ─────────────────────────────────────────────────
     slack_bot_token: str = Field(default="", validation_alias="SLACK_BOT_TOKEN")
+    telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: str = Field(default="", validation_alias="TELEGRAM_CHAT_ID")
     github_token: str = Field(default="", validation_alias="GITHUB_TOKEN")
     jira_url: str = Field(default="", validation_alias="JIRA_URL")
     jira_user: str = Field(default="", validation_alias="JIRA_USER")

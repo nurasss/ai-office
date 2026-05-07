@@ -22,6 +22,8 @@ OPENAI_API_KEY=sk-...
 ```text
 OPENAI_DEFAULT_MODEL=gpt-4o-mini
 OPENAI_HEAVY_MODEL=gpt-4o
+TELEGRAM_BOT_TOKEN=123456789:...
+TELEGRAM_CHAT_ID=123456789
 ```
 
 7. Запустить деплой.
@@ -59,9 +61,13 @@ gh repo create ai-office --private --source=. --remote=origin --push
 OPENAI_API_KEY=sk-...
 OPENAI_DEFAULT_MODEL=gpt-4o-mini
 OPENAI_HEAVY_MODEL=gpt-4o
+TELEGRAM_BOT_TOKEN=123456789:...
+TELEGRAM_CHAT_ID=123456789
 ENVIRONMENT=production
 LOG_LEVEL=INFO
 ```
+
+`TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` нужны для уведомления после завершения PMO-задачи. Если они не заданы, чат продолжит работать, но уведомление будет пропущено.
 
 Команда запуска внутри контейнера уже задана:
 
