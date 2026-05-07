@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: ai-office
+    env: docker
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: OPENAI_DEFAULT_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_HEAVY_MODEL
+        value: gpt-4o
+      - key: OPENAI_API_KEY
+        sync: false

@@ -1,0 +1,68 @@
+# ─── Конфигурация агентов ─────────────────────────────────────────────
+agents:
+  pmo:
+    model_provider: openai
+    model_default: gpt-4o-mini
+    model_heavy: gpt-4o
+    temperature: 0.1
+    max_tokens: 4096
+    max_iterations: 10
+
+  data_analyst:
+    model_provider: openai
+    model_default: gpt-4o-mini
+    model_heavy: gpt-4o
+    temperature: 0.0
+    max_tokens: 8192
+    self_verification: true
+    max_verification_rounds: 3
+
+  developer:
+    model_provider: openai
+    model_default: gpt-4o-mini
+    model_heavy: gpt-4o
+    temperature: 0.1
+    max_tokens: 8192
+
+  copywriter:
+    model_provider: openai
+    model_default: gpt-4o-mini
+    model_heavy: gpt-4o
+    temperature: 0.3
+    max_tokens: 4096
+
+  support:
+    model_provider: openai
+    model_default: gpt-4o-mini
+    model_heavy: gpt-4o
+    temperature: 0.1
+    max_tokens: 4096
+    escalation_threshold: 0.7  # confidence threshold для L1→L2
+
+  strategist:
+    model_provider: openai
+    model_default: gpt-4o-mini
+    model_heavy: gpt-4o
+    temperature: 0.2
+    max_tokens: 8192
+
+  accountant:
+    model_provider: openai
+    model_default: gpt-4o-mini
+    model_heavy: gpt-4o
+    temperature: 0.0
+    max_tokens: 4096
+    zero_hallucination: true
+    math_audit_rounds: 2
+
+# ─── Оркестратор ─────────────────────────────────────────────────────
+orchestrator:
+  max_graph_iterations: 50
+  recursion_limit: 100
+
+# ─── RAG ─────────────────────────────────────────────────────────────
+rag:
+  chunk_size: 1024
+  chunk_overlap: 128
+  top_k: 5
+  vector_store: pgvector  # pgvector | pinecone
