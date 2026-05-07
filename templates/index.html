@@ -12,8 +12,10 @@
             background: #0f0f23;
             color: #e0e0e0;
             height: 100vh;
+            min-height: 100dvh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
 
         /* ── Header ─────────────────────────────────────────────── */
@@ -24,6 +26,7 @@
             align-items: center;
             gap: 12px;
             border-bottom: 1px solid #333;
+            flex-shrink: 0;
         }
         .header h1 { font-size: 20px; font-weight: 600; }
         .header .badge {
@@ -34,11 +37,17 @@
             border-radius: 10px;
             font-weight: 600;
         }
+        .header .tagline {
+            color: #666;
+            font-size: 13px;
+            margin-left: 8px;
+        }
 
         /* ── Main layout ────────────────────────────────────────── */
         .main {
             display: flex;
             flex: 1;
+            min-height: 0;
             overflow: hidden;
         }
 
@@ -87,6 +96,8 @@
             flex: 1;
             display: flex;
             flex-direction: column;
+            min-width: 0;
+            min-height: 0;
             overflow: hidden;
         }
 
@@ -142,6 +153,8 @@
             font-size: 14px;
             line-height: 1.5;
             white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
         .msg.user .bubble { background: #1e3a6e; border-bottom-right-radius: 4px; }
         .msg.agent .bubble { background: #2a1b4a; border-bottom-left-radius: 4px; }
@@ -225,6 +238,210 @@
             transition: all 0.15s;
         }
         .quick-btn:hover { background: #2a1b4a; color: #fff; border-color: #6d28d9; }
+
+        @media (max-width: 760px) {
+            .header {
+                padding: 12px 14px;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .header h1 {
+                font-size: 18px;
+                line-height: 1.1;
+            }
+            .header .badge {
+                font-size: 10px;
+                padding: 2px 7px;
+            }
+            .header .tagline {
+                flex-basis: 100%;
+                margin-left: 0;
+                font-size: 12px;
+                line-height: 1.25;
+            }
+
+            .main {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                min-height: 82px;
+                display: flex;
+                gap: 8px;
+                padding: 10px 12px;
+                border-right: none;
+                border-bottom: 1px solid #2a2a4a;
+                overflow-x: auto;
+                overflow-y: hidden;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+            .sidebar::-webkit-scrollbar {
+                display: none;
+            }
+            .sidebar-title {
+                display: none;
+            }
+            .agent-btn {
+                width: auto;
+                min-width: 86px;
+                max-width: 112px;
+                flex: 0 0 auto;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
+                padding: 8px 10px;
+                border: 1px solid #2a2a4a;
+                border-radius: 8px;
+                background: #17172c;
+                text-align: center;
+            }
+            .agent-btn.active {
+                border-left: 1px solid #6d28d9;
+                border-bottom: 3px solid #a78bfa;
+                background: #2a1b4a;
+            }
+            .agent-btn .icon {
+                font-size: 20px;
+                line-height: 1;
+            }
+            .agent-btn .info {
+                min-width: 0;
+                width: 100%;
+                align-items: center;
+            }
+            .agent-btn .name {
+                width: 100%;
+                font-size: 12px;
+                line-height: 1.15;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .agent-btn .desc {
+                display: none;
+            }
+
+            .chat-header {
+                padding: 10px 12px;
+                gap: 7px;
+                min-height: 44px;
+            }
+            .chat-header .agent-name {
+                font-size: 14px;
+                flex-shrink: 0;
+            }
+            .chat-header .agent-model {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .messages {
+                padding: 12px;
+                gap: 12px;
+            }
+            .msg {
+                max-width: 100%;
+                gap: 8px;
+            }
+            .msg > div:not(.avatar) {
+                min-width: 0;
+            }
+            .msg .avatar {
+                width: 28px;
+                height: 28px;
+                border-radius: 7px;
+                font-size: 14px;
+            }
+            .msg .bubble {
+                padding: 10px 12px;
+                font-size: 13px;
+                line-height: 1.45;
+                border-radius: 10px;
+            }
+
+            .welcome {
+                justify-content: flex-start;
+                padding: 18px 2px 8px;
+                gap: 12px;
+            }
+            .welcome h2 {
+                font-size: 19px;
+                line-height: 1.2;
+                text-align: center;
+            }
+            .welcome p {
+                max-width: 100%;
+                font-size: 13px;
+                line-height: 1.45;
+            }
+            .quick-actions {
+                width: 100%;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 8px;
+            }
+            .quick-btn {
+                width: 100%;
+                min-height: 42px;
+                padding: 8px 10px;
+                font-size: 12px;
+                line-height: 1.25;
+                white-space: normal;
+            }
+
+            .typing {
+                padding: 0 12px 8px;
+            }
+
+            .input-area {
+                padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+                gap: 8px;
+                align-items: stretch;
+            }
+            .input-area textarea {
+                min-height: 42px;
+                max-height: 104px;
+                padding: 11px 12px;
+                font-size: 16px;
+                border-radius: 8px;
+            }
+            .send-btn {
+                min-width: 96px;
+                padding: 0 14px;
+                border-radius: 8px;
+                font-size: 13px;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .header .tagline {
+                display: none;
+            }
+            .sidebar {
+                min-height: 76px;
+                padding: 8px 10px;
+            }
+            .agent-btn {
+                min-width: 76px;
+                max-width: 92px;
+                padding: 7px 8px;
+            }
+            .agent-btn .name {
+                font-size: 11px;
+            }
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
+            .send-btn {
+                min-width: 84px;
+                padding: 0 12px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -232,7 +449,7 @@
 <div class="header">
     <h1>🏢 AI Office</h1>
     <span class="badge">v1.0</span>
-    <span style="color:#666; font-size:13px; margin-left:8px;">Цифровой офис с 7 ИИ-агентами</span>
+    <span class="tagline">Цифровой офис с 7 ИИ-агентами</span>
 </div>
 
 <div class="main">
