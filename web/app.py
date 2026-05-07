@@ -77,7 +77,11 @@ async def index(request: Request):
         {"id": "strategist", "name": "Стратег", "icon": "🎯", "desc": "Анализ рынка"},
         {"id": "accountant", "name": "Бухгалтер", "icon": "🧮", "desc": "Финансы"},
     ]
-    return templates.TemplateResponse("index.html", {"request": request, "agents": agents_list})
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"agents": agents_list},
+    )
 
 
 # ── API: отправка сообщения агенту ───────────────────────────────────
