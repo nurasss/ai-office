@@ -2,6 +2,7 @@
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from tenacity import RetryError
@@ -25,6 +26,12 @@ setup_logging("INFO")
 logger = get_logger("web")
 
 app = FastAPI(title="AI Office", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 templates = Jinja2Templates(directory="templates")
 
 # ── Кэш агентов (lazy init) ──────────────────────────────────────────
