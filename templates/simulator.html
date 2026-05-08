@@ -258,6 +258,7 @@
             font-size: 13px;
             line-height: 1.4;
             color: #d1d5db;
+            white-space: pre-wrap;
         }
         .log-item strong {
             display: block;
@@ -599,18 +600,20 @@
         clearRoute();
     }
 
-    async function sendSimulatorTelegram(task, selectedAgent, selectedName) {
-        const response = await fetch('/api/telegram/notify', {
+    async function runRealAgent(task, selectedAgent) {
+        const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 agent_id: selectedAgent,
-                task,
-                task_id: 'simulator',
-                result: `PMO завершил симуляцию. Исполнитель: ${selectedName}.`,
+                message: task,
             }),
         });
-        return response.json();
+        const data = await response.json();
+        if (!response.ok || data.status !== 'ok') {
+            throw new Error(data.error || 'Агент не смог завершить задачу');
+        }
+        return data;
     }
 
     async function runSimulation() {
@@ -667,15 +670,19 @@
         }
 
         setState('done', 'готово');
-        stateEls.telegram.textContent = 'PMO отправляет уведомление';
+        stateEls.telegram.textContent = `${selectedName} генерирует ответ`;
         await moveTo('done', 'pmo', selectedAgent);
-        addLog('Финал', `State.status = completed. PMO завершил задачу и отправляет Telegram-уведомление владельцу процесса.`, 'good');
+        addLog('Финал', `State.status = completed. PMO завершил визуальный цикл и запускает настоящего агента для ответа.`, 'good');
 
         try {
-            const telegram = await sendSimulatorTelegram(task, selectedAgent, selectedName);
-            if (telegram.telegram_notified) {
+            const agentResult = await runRealAgent(task, selectedAgent);
+            const answer = agentResult.result || 'Агент завершил задачу без текстового ответа.';
+            const preview = answer.length > 1600 ? `${answer.slice(0, 1600)}...` : answer;
+            addLog(`Ответ: ${selectedName}`, preview, 'good');
+
+            if (agentResult.telegram_notified) {
                 stateEls.telegram.textContent = 'уведомление отправлено';
-                addLog('Telegram', 'Backend подтвердил отправку уведомления в Telegram.', 'good');
+                addLog('Telegram', `Backend отправил в Telegram настоящий ответ агента. Task ID: ${agentResult.task_id || 'n/a'}.`, 'good');
             } else {
                 stateEls.telegram.textContent = 'не отправлено';
                 addLog('Telegram', 'Backend не смог отправить уведомление. Проверь TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.', 'warn');
