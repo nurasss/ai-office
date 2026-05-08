@@ -599,6 +599,20 @@
         clearRoute();
     }
 
+    async function sendSimulatorTelegram(task, selectedAgent, selectedName) {
+        const response = await fetch('/api/telegram/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                agent_id: selectedAgent,
+                task,
+                task_id: 'simulator',
+                result: `PMO завершил симуляцию. Исполнитель: ${selectedName}.`,
+            }),
+        });
+        return response.json();
+    }
+
     async function runSimulation() {
         runBtn.disabled = true;
         log.innerHTML = '';
@@ -656,7 +670,20 @@
         stateEls.telegram.textContent = 'PMO отправляет уведомление';
         await moveTo('done', 'pmo', selectedAgent);
         addLog('Финал', `State.status = completed. PMO завершил задачу и отправляет Telegram-уведомление владельцу процесса.`, 'good');
-        stateEls.telegram.textContent = 'уведомление отправлено';
+
+        try {
+            const telegram = await sendSimulatorTelegram(task, selectedAgent, selectedName);
+            if (telegram.telegram_notified) {
+                stateEls.telegram.textContent = 'уведомление отправлено';
+                addLog('Telegram', 'Backend подтвердил отправку уведомления в Telegram.', 'good');
+            } else {
+                stateEls.telegram.textContent = 'не отправлено';
+                addLog('Telegram', 'Backend не смог отправить уведомление. Проверь TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.', 'warn');
+            }
+        } catch (error) {
+            stateEls.telegram.textContent = 'ошибка отправки';
+            addLog('Telegram', `Ошибка соединения с backend: ${error.message}.`, 'warn');
+        }
 
         runBtn.disabled = false;
     }

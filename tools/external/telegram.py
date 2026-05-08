@@ -1,4 +1,4 @@
-"""Telegram notification helper for PMO completion events."""
+"""Telegram notification helper for agent completion events."""
 
 import asyncio
 import json

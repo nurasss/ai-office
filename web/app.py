@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from tenacity import RetryError
+from typing import Optional
 
 from agents import (
     AccountantAgent,
@@ -69,6 +70,30 @@ def format_error(error: Exception) -> str:
     return message.strip('"') or error.__class__.__name__
 
 
+async def notify_agent_completion(
+    agent_id: str,
+    message: str,
+    response_text: str,
+    task_id: str,
+    *,
+    routed_by_pmo: bool = False,
+    title: Optional[str] = None,
+) -> bool:
+    """Send a Telegram notification after an agent finishes a task."""
+    agent_name = AGENT_NAMES.get(agent_id, agent_id)
+    notification_title = title or (
+        "AI Office: PMO завершил задачу" if routed_by_pmo else "AI Office: бот завершил задачу"
+    )
+
+    return await send_telegram_message(
+        f"{notification_title}\n"
+        f"Исполнитель: {agent_name}\n"
+        f"Task ID: {task_id}\n"
+        f"Запрос: {message[:700]}\n\n"
+        f"Результат:\n{response_text[:1800]}"
+    )
+
+
 async def run_pmo_dispatch(message: str) -> dict[str, object]:
     """PMO routes the task and returns the selected agent's user-facing answer."""
     pmo = get_agent("pmo")
@@ -89,12 +114,12 @@ async def run_pmo_dispatch(message: str) -> dict[str, object]:
     result = await target_agent.invoke(message)
     response_text = result.get("result", "")
     task_id = result.get("task_id", "")
-    telegram_sent = await send_telegram_message(
-        "AI Office: PMO завершил задачу\n"
-        f"Исполнитель: {AGENT_NAMES.get(target_agent_id, target_agent_id)}\n"
-        f"Task ID: {task_id}\n"
-        f"Запрос: {message[:700]}\n\n"
-        f"Результат:\n{response_text[:1800]}"
+    telegram_sent = await notify_agent_completion(
+        target_agent_id,
+        message,
+        response_text,
+        task_id,
+        routed_by_pmo=True,
     )
 
     return {
@@ -144,6 +169,29 @@ async def simulator(request: Request):
     )
 
 
+@app.post("/api/telegram/notify")
+async def telegram_notify(request: Request):
+    """Send a Telegram notification from UI-only flows such as the simulator."""
+    data = await request.json()
+    task = data.get("task", "").strip() or "Симулятор AI Office"
+    agent_id = data.get("agent_id", "pmo")
+    result = data.get("result", "").strip() or "Задача завершена в симуляторе."
+    task_id = data.get("task_id", "").strip() or "simulator"
+
+    telegram_sent = await notify_agent_completion(
+        agent_id,
+        task,
+        result,
+        task_id,
+        title="AI Office: симулятор завершил задачу",
+    )
+
+    return JSONResponse({
+        "telegram_notified": telegram_sent,
+        "status": "ok" if telegram_sent else "error",
+    })
+
+
 # ── API: отправка сообщения агенту ───────────────────────────────────
 @app.post("/api/chat")
 async def chat(request: Request):
@@ -166,12 +214,22 @@ async def chat(request: Request):
             return JSONResponse(await run_pmo_dispatch(message))
 
         result = await agent.invoke(message)
+        response_text = result.get("result", "")
+        task_id = result.get("task_id", "")
+        telegram_sent = await notify_agent_completion(
+            agent_id,
+            message,
+            response_text,
+            task_id,
+        )
+
         return JSONResponse({
             "agent_id": agent_id,
             "handled_by": agent_id,
             "handled_by_name": AGENT_NAMES.get(agent_id, agent_id),
-            "result": result.get("result", ""),
-            "task_id": result.get("task_id", ""),
+            "result": response_text,
+            "task_id": task_id,
+            "telegram_notified": telegram_sent,
             "status": "ok",
         })
     except MissingLLMCredentialsError as e:

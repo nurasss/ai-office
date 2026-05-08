@@ -643,7 +643,8 @@
                     ? `PMO → ${agentNames[handledBy] || handledBy}`
                     : '';
                 const task = data.task_id ? `task: ${data.task_id}` : '';
-                const meta = [routed, task].filter(Boolean).join(' · ');
+                const telegram = data.telegram_notified ? 'Telegram ✓' : 'Telegram не отправлен';
+                const meta = [routed, task, telegram].filter(Boolean).join(' · ');
                 addMessage('agent', data.result, meta, agentIcons[handledBy] || '');
             } else {
                 addMessage('agent', `❌ Ошибка: ${data.error}`, '');
