@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Environment(str, Enum):
     DEVELOPMENT = "development"
@@ -16,6 +16,12 @@ class Environment(str, Enum):
 
 class Settings(BaseSettings):
     """Глобальные настройки, загружаемые из .env и config/settings.yaml."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
     # ── API Keys ───────────────────────────────────────────────────────
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
@@ -51,11 +57,6 @@ class Settings(BaseSettings):
     environment: Environment = Field(
         default=Environment.DEVELOPMENT, validation_alias="ENVIRONMENT"
     )
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
 
 def load_agent_config() -> dict[str, Any]:
     """Загрузить YAML-конфигурацию агентов из config/settings.yaml."""

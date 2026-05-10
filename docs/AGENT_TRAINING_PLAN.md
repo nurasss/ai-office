@@ -5,7 +5,7 @@
 ## Техническая схема
 
 1. **Изолированные RAG namespaces.** Каждый агент получает свой namespace: `agent_pmo`, `agent_copywriter`, `agent_developer`, `agent_support`, `agent_data_analyst`, `agent_accountant`, `agent_strategist`. Общие сведения компании хранятся отдельно в `common_corporate`.
-2. **Загрузка источников.** Каталог источников описан в [config/knowledge_sources.yaml](../config/knowledge_sources.yaml). Файлы кладутся в `knowledge/<agent>/...`, затем индексируются через `scripts/ingest_knowledge.py`.
+2. **Загрузка источников.** Каталог источников описан в [config/knowledge_sources.yaml](../config/knowledge_sources.yaml). Файлы кладутся в `knowledge/<agent>/...` и `knowledge/common/...`, затем индексируются через `scripts/ingest_knowledge.py`.
 3. **Долгосрочная память.** Успешные решения и инциденты сохраняются в `data/memory/*.jsonl`. Папка `data/` игнорируется Git, поэтому runtime-память не попадает в репозиторий.
 4. **Общий корпоративный контекст.** Все агенты могут читать только `common_corporate` и собственный namespace. PMO координирует передачу результатов между агентами.
 5. **Контроль доступа.** Финансовые, технические, support и маркетинговые материалы не смешиваются. Cross-agent контекст передается только явно через состояние оркестратора.
