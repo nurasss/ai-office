@@ -1,0 +1,189 @@
+# Каталог обучающих источников для изолированных RAG-пространств.
+#
+# Правило безопасности:
+# - каждый агент видит только common.namespace и собственный namespace;
+# - cross-agent доступ возможен только через PMO/оркестратор и явно переданный контекст;
+# - raw finance/code/support-ticket данные не смешиваются с маркетинговыми источниками.
+
+common:
+  namespace: common_corporate
+  description: "Общая корпоративная память: описание компании, базовые регламенты, роли AI Office."
+  allowed_agents:
+    - pmo
+    - copywriter
+    - developer
+    - support
+    - data_analyst
+    - accountant
+    - strategist
+  sources:
+    - id: company_overview
+      title: "Описание компании и продуктов"
+      path: knowledge/common/company_overview/
+      formats: [md, txt, pdf]
+    - id: ai_office_roles
+      title: "Инструкция по ролям AI Office"
+      path: knowledge/common/ai_office_roles/
+      formats: [md, txt, yaml]
+    - id: general_business_processes
+      title: "Общие регламенты бизнес-процессов"
+      path: knowledge/common/business_processes/
+      formats: [md, txt, pdf]
+
+agents:
+  pmo:
+    namespace: agent_pmo
+    description: "PMO: структура компании, маршрутизация, SLA, SMART-постановка задач."
+    include_common: true
+    sources:
+      - id: org_structure
+        title: "Структура отделов из Notion/Confluence"
+        path: knowledge/pmo/org_structure/
+        formats: [md, txt, pdf, yaml]
+      - id: process_regulations
+        title: "Регламенты бизнес-процессов"
+        path: knowledge/pmo/process_regulations/
+        formats: [md, txt, pdf]
+      - id: routing_rules
+        title: "Карта ответственности агентов"
+        path: knowledge/pmo/routing_rules/
+        formats: [md, txt, yaml]
+      - id: smart_templates
+        title: "Шаблоны постановки задач по SMART"
+        path: knowledge/pmo/smart_templates/
+        formats: [md, txt]
+
+  copywriter:
+    namespace: agent_copywriter
+    description: "Copywriter: tone of voice, форматы текстов, глоссарий и лучшие примеры."
+    include_common: true
+    forbidden_namespaces:
+      - agent_developer
+      - agent_data_analyst
+      - agent_accountant
+    sources:
+      - id: brandbook_communications
+        title: "Брендбук и правила коммуникации"
+        path: knowledge/copywriter/brandbook/
+        formats: [md, txt, pdf]
+      - id: best_human_content
+        title: "20-50 эталонных постов, статей и рассылок"
+        path: knowledge/copywriter/examples/
+        formats: [md, txt]
+      - id: product_glossary
+        title: "Глоссарий терминов и названий продуктов"
+        path: knowledge/copywriter/glossary/
+        formats: [md, txt, yaml]
+
+  developer:
+    namespace: agent_developer
+    description: "Developer: style guides, архитектура, API, исторические PR."
+    include_common: true
+    sources:
+      - id: code_style_guides
+        title: "Внутренние Python/JS style guides"
+        path: knowledge/developer/style_guides/
+        formats: [md, txt, pdf]
+      - id: architecture_schemes
+        title: "Архитектурные схемы проектов"
+        path: knowledge/developer/architecture/
+        formats: [md, txt, pdf, yaml, json]
+      - id: api_specs
+        title: "Swagger/OpenAPI и техническая документация"
+        path: knowledge/developer/api_specs/
+        formats: [md, txt, yaml, json]
+      - id: pull_request_history
+        title: "Исторические Pull Requests и решения code review"
+        path: knowledge/developer/pull_requests/
+        formats: [md, txt]
+
+  support:
+    namespace: agent_support
+    description: "Support: FAQ, успешные тикеты, user manuals, правила эскалации."
+    include_common: true
+    sources:
+      - id: faq
+        title: "База часто задаваемых вопросов"
+        path: knowledge/support/faq/
+        formats: [md, txt]
+      - id: successful_tickets
+        title: "Успешно закрытые тикеты Zendesk/Jira"
+        path: knowledge/support/successful_tickets/
+        formats: [md, txt, json]
+      - id: user_manuals
+        title: "Руководства пользователя"
+        path: knowledge/support/user_manuals/
+        formats: [md, txt, pdf]
+      - id: escalation_rules
+        title: "Регламенты L1/L2 эскалации"
+        path: knowledge/support/escalation_rules/
+        formats: [md, txt, yaml]
+
+  data_analyst:
+    namespace: agent_data_analyst
+    description: "Data Analyst: словари данных, KPI, SQL-паттерны, отчеты и дашборды."
+    include_common: true
+    forbidden_namespaces:
+      - agent_copywriter
+      - agent_accountant
+    sources:
+      - id: data_dictionaries
+        title: "Описание таблиц и столбцов корпоративных БД"
+        path: knowledge/data_analyst/data_dictionaries/
+        formats: [md, txt, yaml, json, csv]
+      - id: kpi_formulas
+        title: "Формулы расчета CAC, LTV и других KPI"
+        path: knowledge/data_analyst/kpi_formulas/
+        formats: [md, txt, yaml]
+      - id: analytics_reports
+        title: "Примеры успешных отчетов и дашбордов"
+        path: knowledge/data_analyst/report_examples/
+        formats: [md, txt, pdf]
+
+  accountant:
+    namespace: agent_accountant
+    description: "Accountant: шаблоны документов, учетная политика, налоги, матрица допусков."
+    include_common: true
+    forbidden_namespaces:
+      - agent_copywriter
+      - agent_developer
+      - agent_support
+    sources:
+      - id: invoice_templates
+        title: "Шаблоны инвойсов, договоров и актов"
+        path: knowledge/accountant/document_templates/
+        formats: [md, txt, pdf]
+      - id: accounting_policy
+        title: "Внутренняя учетная политика"
+        path: knowledge/accountant/accounting_policy/
+        formats: [md, txt, pdf]
+      - id: tax_reference
+        title: "Справочники налоговых ставок и лимитов"
+        path: knowledge/accountant/tax_reference/
+        formats: [md, txt, yaml]
+      - id: approval_matrix
+        title: "Матрица согласования сумм"
+        path: knowledge/accountant/approval_matrix/
+        formats: [md, txt, yaml, csv]
+
+  strategist:
+    namespace: agent_strategist
+    description: "Strategist: OKR, рынок, конкуренты, бизнес-планы, финмодели."
+    include_common: true
+    sources:
+      - id: okrs
+        title: "Стратегические цели и OKR на год/квартал"
+        path: knowledge/strategist/okrs/
+        formats: [md, txt, yaml]
+      - id: market_research
+        title: "Исследования рынка и отраслевые отчеты"
+        path: knowledge/strategist/market_research/
+        formats: [md, txt, pdf]
+      - id: competitor_dossiers
+        title: "Досье на конкурентов: цены, фичи, слабости"
+        path: knowledge/strategist/competitors/
+        formats: [md, txt, pdf, csv]
+      - id: business_plans
+        title: "Прошлые бизнес-планы и финмодели"
+        path: knowledge/strategist/business_plans/
+        formats: [md, txt, pdf, csv]

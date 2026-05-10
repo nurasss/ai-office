@@ -13,6 +13,8 @@ from langchain_core.tools import BaseTool
 from core.config import load_agent_config
 from core.llm_router import AgentConfig, LLMRouter
 from core.logger import get_logger
+from memory import LongTermMemoryStore, format_memory_context
+from rag.retriever import Retriever
 
 logger = get_logger("agents.base")
 
@@ -46,6 +48,8 @@ class BaseAgent(ABC):
         self.max_tokens = max_tokens
         self.system_prompt = self._load_prompt()
         self._model: Optional[BaseChatModel] = None
+        self.retriever = Retriever(agent_id=self.agent_id)
+        self.memory = LongTermMemoryStore()
 
         logger.info(
             "agent.initialized",
@@ -93,6 +97,7 @@ class BaseAgent(ABC):
         context: Optional[dict[str, Any]] = None,
         *,
         use_heavy: bool = False,
+        remember: bool = True,
     ) -> dict[str, Any]:
         """Выполнить задачу — основной метод агента.
 
@@ -100,6 +105,7 @@ class BaseAgent(ABC):
             task: текст задачи.
             context: дополнительный контекст от других агентов.
             use_heavy: использовать тяжёлую модель.
+            remember: записать успешное решение в long-term memory.
 
         Returns:
             Словарь с ключами: agent_id, task_id, result, status.
@@ -115,6 +121,10 @@ class BaseAgent(ABC):
         messages: list[BaseMessage] = [
             SystemMessage(content=self.system_prompt),
         ]
+
+        operational_context = await self._build_operational_context(task)
+        if operational_context:
+            messages.append(HumanMessage(content=operational_context))
 
         if context:
             messages.append(
@@ -138,6 +148,13 @@ class BaseAgent(ABC):
             "status": "completed",
         }
 
+        if remember:
+            self._record_success_memory(
+                task_id=task_id,
+                task=task,
+                outcome=str(response.content),
+            )
+
         logger.info(
             "agent.invoke.done",
             agent_id=self.agent_id,
@@ -145,6 +162,79 @@ class BaseAgent(ABC):
         )
 
         return result
+
+    async def _build_operational_context(self, task: str) -> str:
+        """Collect isolated RAG and memory context for the current agent."""
+        blocks: list[str] = []
+
+        try:
+            rag_documents = await self.retriever.retrieve(task, agent_id=self.agent_id)
+        except Exception as error:
+            logger.warning(
+                "agent.rag_context.failed",
+                agent_id=self.agent_id,
+                error=str(error),
+            )
+            rag_documents = []
+
+        if rag_documents:
+            blocks.append(self._format_rag_context(rag_documents))
+
+        try:
+            memory_events = self.memory.search(agent_id=self.agent_id, query=task)
+        except Exception as error:
+            logger.warning(
+                "agent.memory_context.failed",
+                agent_id=self.agent_id,
+                error=str(error),
+            )
+            memory_events = []
+
+        memory_context = format_memory_context(memory_events)
+        if memory_context:
+            blocks.append(memory_context)
+
+        return "\n\n".join(blocks)
+
+    def _record_success_memory(
+        self,
+        *,
+        task_id: str,
+        task: str,
+        outcome: str,
+    ) -> None:
+        """Persist a compact successful outcome without blocking the response."""
+        memory_config = load_agent_config().get("memory", {})
+        if not memory_config.get("record_successes", True):
+            return
+
+        try:
+            self.memory.record_success(
+                agent_id=self.agent_id,
+                task=task,
+                outcome=outcome,
+                metadata={"task_id": task_id},
+            )
+        except Exception as error:
+            logger.warning(
+                "agent.memory_record.failed",
+                agent_id=self.agent_id,
+                task_id=task_id,
+                error=str(error),
+            )
+
+    @staticmethod
+    def _format_rag_context(documents: list[dict[str, Any]]) -> str:
+        """Render RAG documents into a compact prompt block."""
+        lines = ["Контекст из изолированной базы знаний агента:"]
+        for index, document in enumerate(documents, start=1):
+            metadata = document.get("metadata", {})
+            source = metadata.get("source") or metadata.get("source_id") or "unknown"
+            content = str(document.get("content", "")).strip()
+            if len(content) > 1200:
+                content = f"{content[:1200]}..."
+            lines.append(f"[{index}] source={source}\n{content}")
+        return "\n".join(lines)
 
     @abstractmethod
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:
