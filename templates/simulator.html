@@ -32,8 +32,13 @@
             font-weight: 700;
         }
         .header p { color: #8b8aa0; font-size: 13px; }
-        .nav-link {
+        .nav-actions {
             margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .nav-link {
             color: #c4b5fd;
             text-decoration: none;
             font-size: 13px;
@@ -42,6 +47,7 @@
             border-radius: 8px;
             padding: 7px 10px;
             background: rgba(42, 27, 74, 0.55);
+            white-space: nowrap;
         }
         .nav-link:hover {
             color: #fff;
@@ -322,6 +328,9 @@
             }
             .header h1 { font-size: 18px; }
             .header p { display: none; }
+            .nav-actions {
+                margin-left: auto;
+            }
             .nav-link {
                 padding: 6px 8px;
             }
@@ -345,7 +354,10 @@
     <h1>🏢 AI Office</h1>
     <span class="badge">LangGraph</span>
     <p>PMO выбирает одного из 6 исполнителей, проверяет качество и завершает задачу</p>
-    <a class="nav-link" href="/">Чат</a>
+    <nav class="nav-actions" aria-label="Навигация">
+        <a class="nav-link" href="/">Чат</a>
+        <a class="nav-link" href="https://office-ai-psi.vercel.app" target="_blank" rel="noopener noreferrer">Office AI</a>
+    </nav>
 </header>
 
 <main class="shell">

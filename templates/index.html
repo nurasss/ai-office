@@ -42,8 +42,13 @@
             font-size: 13px;
             margin-left: 8px;
         }
-        .header .nav-link {
+        .header .nav-actions {
             margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header .nav-link {
             color: #c4b5fd;
             text-decoration: none;
             font-size: 13px;
@@ -52,6 +57,7 @@
             border-radius: 8px;
             padding: 7px 10px;
             background: rgba(42, 27, 74, 0.55);
+            white-space: nowrap;
         }
         .header .nav-link:hover {
             color: #fff;
@@ -275,8 +281,10 @@
                 font-size: 12px;
                 line-height: 1.25;
             }
-            .header .nav-link {
+            .header .nav-actions {
                 margin-left: auto;
+            }
+            .header .nav-link {
                 padding: 6px 9px;
                 font-size: 12px;
             }
@@ -471,7 +479,10 @@
     <h1>🏢 AI Office</h1>
     <span class="badge">v1.0</span>
     <span class="tagline">Цифровой офис с 7 ИИ-агентами</span>
-    <a class="nav-link" href="/simulator">Симулятор</a>
+    <nav class="nav-actions" aria-label="Навигация">
+        <a class="nav-link" href="/simulator">Симулятор</a>
+        <a class="nav-link" href="https://office-ai-psi.vercel.app" target="_blank" rel="noopener noreferrer">Office AI</a>
+    </nav>
 </div>
 
 <div class="main">
