@@ -49,7 +49,21 @@ ai_office/
 ├── prompts/         # System prompts (YAML)
 ├── tools/           # MCP-инструменты (Slack, Jira, GitHub, ERP)
 ├── rag/             # Векторная БД (pgvector / Pinecone)
+├── knowledge/       # Исходные документы для изолированных RAG namespaces
+├── memory/          # Long-term memory store
+├── scripts/         # Служебные команды, включая ingest_knowledge.py
 ├── orchestrator.py  # LangGraph StateGraph
 ├── config/          # Настройки (YAML)
 └── requirements.txt
 ```
+
+## Обучение агентов
+
+Источники знаний описаны в `config/knowledge_sources.yaml`. Каждый агент индексируется в отдельный namespace, а общая корпоративная память хранится отдельно в `common_corporate`.
+
+```bash
+python scripts/ingest_knowledge.py --agent all --include-common --dry-run
+python scripts/ingest_knowledge.py --agent pmo --include-common
+```
+
+Подробная программа обучения: `docs/AGENT_TRAINING_PLAN.md`.

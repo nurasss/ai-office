@@ -66,6 +66,7 @@ class DataAnalystAgent(BaseAgent):
         context: Optional[dict[str, Any]] = None,
         *,
         use_heavy: bool = False,
+        remember: bool = True,
     ) -> dict[str, Any]:
         """Аналитик не выдумывает числа, если пользователь не передал источник данных."""
         if self._should_request_data_source(task, context):
@@ -89,7 +90,12 @@ class DataAnalystAgent(BaseAgent):
                 "status": "completed",
             }
 
-        return await super().invoke(task, context=context, use_heavy=use_heavy)
+        return await super().invoke(
+            task,
+            context=context,
+            use_heavy=use_heavy,
+            remember=remember,
+        )
 
     async def _verify_result(self, result: str, task: str) -> dict[str, Any]:
         """Self-verification: перепроверить результат анализа.
@@ -113,7 +119,7 @@ class DataAnalystAgent(BaseAgent):
         Ответь JSON: {{"is_correct": true/false, "confidence": "high/medium/low", "notes": "..."}}
         """
 
-        verify_result = await self.invoke(verify_prompt)
+        verify_result = await self.invoke(verify_prompt, remember=False)
         return {
             "is_correct": True,
             "confidence": "high",
