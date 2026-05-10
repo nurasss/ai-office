@@ -67,3 +67,10 @@ python scripts/ingest_knowledge.py --agent pmo --include-common
 ```
 
 Подробная программа обучения: `docs/AGENT_TRAINING_PLAN.md`.
+
+Для локального smoke-прогона без Postgres используется `local_json` backend:
+
+```bash
+python3 scripts/ingest_knowledge.py --agent all --include-common
+python3 scripts/smoke_first_task.py
+```
