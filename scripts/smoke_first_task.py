@@ -1,16 +1,17 @@
-"""Offline smoke run for the first AI Office task.
+"""Live smoke run for the first AI Office task.
 
-The script verifies the full local loop that does not require API keys:
+The script verifies the local loop and then calls the routed agent's real LLM:
 
 1. PMO routes the user task.
 2. The agent-specific RAG namespaces return scoped context.
-3. A deterministic draft is produced for inspection.
+3. The routed agent receives system prompt + RAG context + task.
 
-For live LLM execution, run the web app or orchestrator with real API keys.
+Use --route-only when you want to inspect routing/RAG without spending tokens.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import sys
 from pathlib import Path
@@ -18,7 +19,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from agents.pmo.pmo_agent import PMOAgent
+from agents import (
+    AccountantAgent,
+    CopywriterAgent,
+    DataAnalystAgent,
+    DeveloperAgent,
+    PMOAgent,
+    StrategistAgent,
+    SupportAgent,
+)
+from agents.base.base_agent import BaseAgent
+from core.llm_router import MissingLLMCredentialsError
 from rag.retriever import Retriever
 
 DEFAULT_TASK = (
@@ -26,9 +37,19 @@ DEFAULT_TASK = (
     "и отправь мне черновик"
 )
 
+AGENT_REGISTRY: dict[str, type[BaseAgent]] = {
+    "accountant": AccountantAgent,
+    "copywriter": CopywriterAgent,
+    "data_analyst": DataAnalystAgent,
+    "developer": DeveloperAgent,
+    "strategist": StrategistAgent,
+    "support": SupportAgent,
+}
+
 
 async def main() -> None:
-    task = " ".join(sys.argv[1:]).strip() or DEFAULT_TASK
+    args = parse_args()
+    task = args.task or DEFAULT_TASK
 
     pmo = PMOAgent()
     subtasks = pmo._decompose_task(task)
@@ -45,18 +66,50 @@ async def main() -> None:
     print_context("PMO RAG context", pmo_context)
     print_context(f"{assigned_to} RAG context", agent_context)
 
-    if assigned_to == "copywriter":
-        print("Draft from Copywriter_Agent (offline deterministic smoke):")
-        print()
-        print(
-            "Мы запустили AI Office - внутренний цифровой офис из ИИ-сотрудников.\n\n"
-            "Теперь типовые задачи можно передавать через PMO: система сама определит, "
-            "кому поручить текст, аналитику, поддержку, код, стратегию или финансовую сверку.\n\n"
-            "Главная цель пилота - ускорить первый результат и снять рутину с команды, "
-            "оставив финальное решение за человеком."
-        )
-    else:
-        print(f"Next agent to invoke in live mode: {assigned_to}")
+    if args.route_only:
+        print(f"Route-only mode: next live agent would be {assigned_to}")
+        return
+
+    agent = create_agent(assigned_to)
+    rag_text = "\n\n".join(
+        str(document.get("content", "")).strip()
+        for document in agent_context
+        if str(document.get("content", "")).strip()
+    )
+
+    try:
+        final_result = await agent.process_task(task, rag_context=rag_text)
+    except MissingLLMCredentialsError as error:
+        print("Live LLM call was not started.")
+        print(str(error))
+        raise SystemExit(2) from error
+
+    print("--- РЕАЛЬНЫЙ ОТВЕТ ОТ LLM ---")
+    print(final_result)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the first live AI Office task.")
+    parser.add_argument(
+        "task",
+        nargs="*",
+        help="Task text. Defaults to the AI Office launch post request.",
+    )
+    parser.add_argument(
+        "--route-only",
+        action="store_true",
+        help="Only print PMO route and RAG hits; do not call the LLM.",
+    )
+    args = parser.parse_args()
+    args.task = " ".join(args.task).strip()
+    return args
+
+
+def create_agent(agent_id: str) -> BaseAgent:
+    agent_cls = AGENT_REGISTRY.get(agent_id)
+    if not agent_cls:
+        raise ValueError(f"Smoke script cannot create agent: {agent_id}")
+    return agent_cls()
 
 
 def print_context(title: str, documents: list[dict]) -> None:

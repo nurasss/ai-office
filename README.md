@@ -74,3 +74,9 @@ python scripts/ingest_knowledge.py --agent pmo --include-common
 python3 scripts/ingest_knowledge.py --agent all --include-common
 python3 scripts/smoke_first_task.py
 ```
+
+Если API-ключи еще не настроены, можно проверить только маршрутизацию и RAG:
+
+```bash
+python3 scripts/smoke_first_task.py --route-only
+```

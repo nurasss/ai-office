@@ -118,25 +118,12 @@ class BaseAgent(ABC):
             use_heavy=use_heavy,
         )
 
-        messages: list[BaseMessage] = [
-            SystemMessage(content=self.system_prompt),
-        ]
-
-        operational_context = await self._build_operational_context(task)
-        if operational_context:
-            messages.append(HumanMessage(content=operational_context))
-
-        if context:
-            messages.append(
-                HumanMessage(content=f"Контекст от других агентов:\n{context}")
-            )
-
-        messages.append(HumanMessage(content=f"Задача:\n{task}"))
-
-        model = self.get_model(use_heavy=use_heavy)
-
         try:
-            response = await model.ainvoke(messages)
+            response_content = await self.process_task(
+                task,
+                context=context,
+                use_heavy=use_heavy,
+            )
         except Exception as e:
             logger.error("agent.invoke.error", agent_id=self.agent_id, error=str(e))
             raise
@@ -144,7 +131,7 @@ class BaseAgent(ABC):
         result = {
             "agent_id": self.agent_id,
             "task_id": task_id,
-            "result": response.content,
+            "result": response_content,
             "status": "completed",
         }
 
@@ -152,7 +139,7 @@ class BaseAgent(ABC):
             self._record_success_memory(
                 task_id=task_id,
                 task=task,
-                outcome=str(response.content),
+                outcome=response_content,
             )
 
         logger.info(
@@ -162,6 +149,45 @@ class BaseAgent(ABC):
         )
 
         return result
+
+    async def process_task(
+        self,
+        task: str,
+        rag_context: str = "",
+        context: Optional[dict[str, Any]] = None,
+        *,
+        use_heavy: bool = False,
+    ) -> str:
+        """Выполнить задачу через реальную LLM с system prompt + RAG context."""
+        messages: list[BaseMessage] = [
+            SystemMessage(content=self.system_prompt),
+        ]
+
+        operational_context = rag_context.strip()
+        if not operational_context:
+            operational_context = await self._build_operational_context(task)
+
+        if operational_context:
+            messages.append(
+                HumanMessage(
+                    content=(
+                        "Используй следующую базу знаний и память для ответа. "
+                        "Если в базе нет ответа, не противоречь найденному контексту.\n\n"
+                        f"БАЗА ЗНАНИЙ:\n{operational_context}"
+                    )
+                )
+            )
+
+        if context:
+            messages.append(
+                HumanMessage(content=f"Контекст от других агентов:\n{context}")
+            )
+
+        messages.append(HumanMessage(content=f"Выполни задачу:\n{task}"))
+
+        model = self.get_model(use_heavy=use_heavy)
+        response = await model.ainvoke(messages)
+        return str(response.content)
 
     async def _build_operational_context(self, task: str) -> str:
         """Collect isolated RAG and memory context for the current agent."""
