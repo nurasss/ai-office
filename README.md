@@ -80,3 +80,21 @@ python3 scripts/smoke_first_task.py
 ```bash
 python3 scripts/smoke_first_task.py --route-only
 ```
+
+## Product API
+
+Основной endpoint для веба, Telegram-бота или Mini App:
+
+```bash
+curl -X POST http://localhost:8000/api/office/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","agent_id":"pmo"}'
+```
+
+Проверить только маршрут и RAG без LLM-вызова:
+
+```bash
+curl -X POST http://localhost:8000/api/office/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","route_only":true}'
+```

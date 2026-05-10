@@ -8,7 +8,10 @@ sys.path.insert(0, '.')
 
 import uvicorn
 
+from api.office import router as office_router
 from web.app import app
+
+app.include_router(office_router)
 
 if __name__ == "__main__":
     uvicorn.run(
