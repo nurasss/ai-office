@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,6 +74,7 @@ class LongTermMemoryStore:
 
         self.enabled = config.get("enabled", True)
         self.max_events_per_context = config.get("max_events_per_context", 3)
+        self.max_events_per_agent = config.get("max_events_per_agent", 200)
         self.shared_incident_namespace = config.get(
             "shared_incident_namespace",
             "common_incidents",
@@ -87,6 +89,8 @@ class LongTermMemoryStore:
         path = self._path_for(event.agent_id)
         with open(path, "a", encoding="utf-8") as file:
             file.write(json.dumps(asdict(event), ensure_ascii=False) + "\n")
+
+        self._prune_file(path)
 
         logger.info(
             "memory.appended",
@@ -173,19 +177,29 @@ class LongTermMemoryStore:
             return []
 
         events: list[MemoryEvent] = []
-        with open(path, "r", encoding="utf-8") as file:
-            for line in file:
-                if not line.strip():
-                    continue
-                try:
-                    events.append(MemoryEvent.from_dict(json.loads(line)))
-                except (json.JSONDecodeError, KeyError) as error:
-                    logger.warning(
-                        "memory.bad_event",
-                        agent_id=agent_id,
-                        error=str(error),
-                    )
+        for line in self._read_recent_lines(path):
+            if not line.strip():
+                continue
+            try:
+                events.append(MemoryEvent.from_dict(json.loads(line)))
+            except (json.JSONDecodeError, KeyError) as error:
+                logger.warning(
+                    "memory.bad_event",
+                    agent_id=agent_id,
+                    error=str(error),
+                )
         return events
+
+    def _read_recent_lines(self, path: Path) -> list[str]:
+        """Read only the newest events so large memory logs stay bounded."""
+        with open(path, "r", encoding="utf-8") as file:
+            return list(deque(file, maxlen=self.max_events_per_agent))
+
+    def _prune_file(self, path: Path) -> None:
+        """Keep each agent memory file to the newest max_events_per_agent events."""
+        recent_lines = self._read_recent_lines(path)
+        with open(path, "w", encoding="utf-8") as file:
+            file.writelines(recent_lines)
 
     def _path_for(self, agent_id: str) -> Path:
         safe_agent_id = re.sub(r"[^a-zA-Z0-9_-]", "_", agent_id)
