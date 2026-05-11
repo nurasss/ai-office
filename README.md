@@ -21,7 +21,7 @@
 ## Быстрый старт
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
@@ -62,8 +62,8 @@ ai_office/
 Источники знаний описаны в `config/knowledge_sources.yaml`. Каждый агент индексируется в отдельный namespace, а общая корпоративная память хранится отдельно в `common_corporate`.
 
 ```bash
-python scripts/ingest_knowledge.py --agent all --include-common --dry-run
-python scripts/ingest_knowledge.py --agent pmo --include-common
+python3 scripts/ingest_knowledge.py --agent all --include-common --dry-run
+python3 scripts/ingest_knowledge.py --agent pmo --include-common
 ```
 
 Подробная программа обучения: `docs/AGENT_TRAINING_PLAN.md`.

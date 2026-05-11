@@ -2,6 +2,7 @@ import asyncio
 
 from rag.retriever import Retriever
 from rag.vector_store import BaseVectorStore, LocalJsonVectorStore
+from scripts.ingest_knowledge import read_file
 
 
 class FakeVectorStore(BaseVectorStore):
@@ -103,3 +104,10 @@ def test_local_json_store_persists_and_filters_by_namespace(tmp_path):
     )
 
     assert [result["id"] for result in results] == ["copy_1"]
+
+
+def test_ingest_reads_sql_sources(tmp_path):
+    sql_path = tmp_path / "metric.sql"
+    sql_path.write_text("select count(*) from users;", encoding="utf-8")
+
+    assert read_file(sql_path) == "select count(*) from users;"

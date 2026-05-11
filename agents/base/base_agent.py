@@ -72,8 +72,21 @@ class BaseAgent(ABC):
 
         return data.get("system_prompt", "")
 
-    def get_model(self, *, use_heavy: bool = False) -> BaseChatModel:
+    def get_model(
+        self,
+        *,
+        use_heavy: bool = False,
+        bind_tools: bool = True,
+    ) -> BaseChatModel:
         """Получить LLM-модель через роутер."""
+        if not bind_tools:
+            return self.router.get_model(
+                self.agent_id,
+                use_heavy=use_heavy,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+
         if self._model is None:
             config = AgentConfig(
                 agent_id=self.agent_id,
@@ -157,6 +170,7 @@ class BaseAgent(ABC):
         context: Optional[dict[str, Any]] = None,
         *,
         use_heavy: bool = False,
+        use_tools: bool = True,
     ) -> str:
         """Выполнить задачу через реальную LLM с system prompt + RAG context."""
         messages: list[BaseMessage] = [
@@ -185,7 +199,7 @@ class BaseAgent(ABC):
 
         messages.append(HumanMessage(content=f"Выполни задачу:\n{task}"))
 
-        model = self.get_model(use_heavy=use_heavy)
+        model = self.get_model(use_heavy=use_heavy, bind_tools=use_tools)
         response = await model.ainvoke(messages)
         return str(response.content)
 
