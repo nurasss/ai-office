@@ -157,7 +157,7 @@ async def submit_office_task(request: OfficeTaskRequest) -> OfficeTaskResponse:
             request.task,
             rag_context=rag_context,
             use_tools=False,
-            max_tokens=1200,
+            max_tokens=2400,
         )
     except MissingLLMCredentialsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

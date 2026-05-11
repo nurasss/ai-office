@@ -36,7 +36,7 @@ def test_web_agent_runner_forces_plain_text_model(monkeypatch):
     assert result["task_id"].startswith("web_")
     assert result["result"] == "Ответ модели"
     assert fake_agent.use_tools is False
-    assert fake_agent.max_tokens == 1200
+    assert fake_agent.max_tokens == 2400
 
 
 def test_rag_context_reads_full_committed_knowledge_source():

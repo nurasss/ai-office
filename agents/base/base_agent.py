@@ -208,13 +208,67 @@ class BaseAgent(ABC):
 
         messages.append(HumanMessage(content=f"Выполни задачу:\n{task}"))
 
+        return await self._invoke_text_model(
+            messages,
+            use_heavy=use_heavy,
+            use_tools=use_tools,
+            max_tokens=max_tokens,
+        )
+
+    async def _invoke_text_model(
+        self,
+        messages: list[BaseMessage],
+        *,
+        use_heavy: bool,
+        use_tools: bool,
+        max_tokens: Optional[int],
+    ) -> str:
+        """Invoke the chat model and retry once if a reasoning model returns empty text."""
         model = self.get_model(
             use_heavy=use_heavy,
             bind_tools=use_tools,
             max_tokens=max_tokens,
         )
         response = await model.ainvoke(messages)
-        return str(response.content)
+        content = self._stringify_response_content(response.content).strip()
+        if content:
+            return content
+
+        logger.warning(
+            "agent.empty_model_response",
+            agent_id=self.agent_id,
+            response_metadata=getattr(response, "response_metadata", {}),
+            additional_kwargs=getattr(response, "additional_kwargs", {}),
+        )
+
+        retry_max_tokens = max(max_tokens or self.max_tokens, 2400)
+        retry_messages = [
+            *messages,
+            HumanMessage(
+                content=(
+                    "Предыдущий ответ модели был пустым. Верни обычный текстовый ответ. "
+                    "Если в базе знаний нет нужных данных, прямо скажи, каких данных не хватает, "
+                    "и не оставляй ответ пустым."
+                )
+            ),
+        ]
+        retry_model = self.get_model(
+            use_heavy=use_heavy,
+            bind_tools=use_tools,
+            max_tokens=retry_max_tokens,
+        )
+        retry_response = await retry_model.ainvoke(retry_messages)
+        retry_content = self._stringify_response_content(retry_response.content).strip()
+        if retry_content:
+            return retry_content
+
+        logger.warning(
+            "agent.empty_model_response_after_retry",
+            agent_id=self.agent_id,
+            response_metadata=getattr(retry_response, "response_metadata", {}),
+            additional_kwargs=getattr(retry_response, "additional_kwargs", {}),
+        )
+        return ""
 
     async def _build_operational_context(self, task: str) -> str:
         """Collect isolated RAG and memory context for the current agent."""
@@ -308,6 +362,23 @@ class BaseAgent(ABC):
                 content = f"{content[:6000]}..."
             lines.append(f"[{index}] source={source}\n{content}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _stringify_response_content(content: Any) -> str:
+        """Normalize provider-specific message content into plain text."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = item.get("text") or item.get("content")
+                    if text:
+                        parts.append(str(text))
+            return "\n".join(parts)
+        return str(content or "")
 
     @staticmethod
     def _read_full_knowledge_source(source: str) -> str:

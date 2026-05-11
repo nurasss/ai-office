@@ -152,7 +152,7 @@ async def run_agent_text_task(agent_id: str, message: str) -> dict[str, str]:
     response_text = await agent.process_task(
         message,
         use_tools=False,
-        max_tokens=1200,
+        max_tokens=2400,
     )
     response_text = str(response_text or "").strip()
     if not response_text:
