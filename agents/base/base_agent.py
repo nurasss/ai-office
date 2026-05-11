@@ -15,6 +15,7 @@ from core.llm_router import AgentConfig, LLMRouter
 from core.logger import get_logger
 from memory import LongTermMemoryStore, format_memory_context
 from rag.knowledge_files import format_knowledge_file_context, search_knowledge_files
+from rag.namespaces import get_agent_profile
 from rag.retriever import Retriever
 
 logger = get_logger("agents.base")
@@ -78,14 +79,17 @@ class BaseAgent(ABC):
         *,
         use_heavy: bool = False,
         bind_tools: bool = True,
+        max_tokens: Optional[int] = None,
     ) -> BaseChatModel:
         """Получить LLM-модель через роутер."""
+        effective_max_tokens = self.max_tokens if max_tokens is None else max_tokens
+
         if not bind_tools:
             return self.router.get_model(
                 self.agent_id,
                 use_heavy=use_heavy,
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=effective_max_tokens,
             )
 
         if self._model is None:
@@ -94,7 +98,7 @@ class BaseAgent(ABC):
                 system_prompt=self.system_prompt,
                 tools=self.tools,
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=effective_max_tokens,
             )
             self._model = self.router.build_agent(config, use_heavy=use_heavy)
         return self._model
@@ -175,6 +179,7 @@ class BaseAgent(ABC):
         *,
         use_heavy: bool = False,
         use_tools: bool = True,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """Выполнить задачу через реальную LLM с system prompt + RAG context."""
         messages: list[BaseMessage] = [
@@ -203,7 +208,11 @@ class BaseAgent(ABC):
 
         messages.append(HumanMessage(content=f"Выполни задачу:\n{task}"))
 
-        model = self.get_model(use_heavy=use_heavy, bind_tools=use_tools)
+        model = self.get_model(
+            use_heavy=use_heavy,
+            bind_tools=use_tools,
+            max_tokens=max_tokens,
+        )
         response = await model.ainvoke(messages)
         return str(response.content)
 
@@ -222,21 +231,24 @@ class BaseAgent(ABC):
             rag_documents = []
 
         if rag_documents:
+            rag_documents = self._select_rag_documents(rag_documents)
             blocks.append(self._format_rag_context(rag_documents))
 
-        try:
-            knowledge_hits = search_knowledge_files(self.agent_id, task, top_k=3)
-        except Exception as error:
-            logger.warning(
-                "agent.knowledge_file_context.failed",
-                agent_id=self.agent_id,
-                error=str(error),
-            )
-            knowledge_hits = []
+        if not self._has_agent_rag_hit(rag_documents):
+            try:
+                knowledge_hits = search_knowledge_files(self.agent_id, task, top_k=3)
+            except Exception as error:
+                logger.warning(
+                    "agent.knowledge_file_context.failed",
+                    agent_id=self.agent_id,
+                    error=str(error),
+                )
+                knowledge_hits = []
 
-        knowledge_context = format_knowledge_file_context(knowledge_hits)
-        if knowledge_context:
-            blocks.append(knowledge_context)
+            knowledge_hits = self._select_knowledge_hits(knowledge_hits)
+            knowledge_context = format_knowledge_file_context(knowledge_hits)
+            if knowledge_context:
+                blocks.append(knowledge_context)
 
         try:
             memory_events = self.memory.search(agent_id=self.agent_id, query=task)
@@ -289,10 +301,71 @@ class BaseAgent(ABC):
             metadata = document.get("metadata", {})
             source = metadata.get("source") or metadata.get("source_id") or "unknown"
             content = str(document.get("content", "")).strip()
-            if len(content) > 1200:
-                content = f"{content[:1200]}..."
+            source_content = BaseAgent._read_full_knowledge_source(str(source))
+            if source_content:
+                content = source_content
+            if len(content) > 6000:
+                content = f"{content[:6000]}..."
             lines.append(f"[{index}] source={source}\n{content}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _read_full_knowledge_source(source: str) -> str:
+        """Read a full committed knowledge file when RAG points at one."""
+        if not source.startswith("knowledge/"):
+            return ""
+
+        source_path = Path(__file__).resolve().parent.parent.parent / source
+        if not source_path.exists() or not source_path.is_file():
+            return ""
+
+        try:
+            return source_path.read_text(encoding="utf-8").strip()
+        except UnicodeDecodeError:
+            return source_path.read_text(encoding="utf-8", errors="ignore").strip()
+
+    def _has_agent_rag_hit(self, documents: list[dict[str, Any]]) -> bool:
+        """Return True when RAG already found agent-specific knowledge."""
+        if not documents:
+            return False
+
+        agent_namespace = get_agent_profile(self.agent_id)["namespace"]
+        for document in documents:
+            metadata = document.get("metadata", {})
+            if (
+                metadata.get("agent_id") == self.agent_id
+                or metadata.get("namespace") == agent_namespace
+            ):
+                return True
+        return False
+
+    def _select_rag_documents(self, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Prefer agent-owned RAG hits and remove duplicate sources."""
+        agent_namespace = get_agent_profile(self.agent_id)["namespace"]
+        agent_documents = [
+            document
+            for document in documents
+            if document.get("metadata", {}).get("agent_id") == self.agent_id
+            or document.get("metadata", {}).get("namespace") == agent_namespace
+        ]
+        selected = agent_documents or documents
+
+        unique_documents: list[dict[str, Any]] = []
+        seen_sources: set[str] = set()
+        for document in selected:
+            metadata = document.get("metadata", {})
+            source = str(metadata.get("source") or metadata.get("source_id") or "")
+            if source and source in seen_sources:
+                continue
+            if source:
+                seen_sources.add(source)
+            unique_documents.append(document)
+        return unique_documents[:2]
+
+    def _select_knowledge_hits(self, hits: list[Any]) -> list[Any]:
+        """Prefer agent-owned file hits when committed knowledge is used."""
+        agent_hits = [hit for hit in hits if getattr(hit, "agent_id", "") == self.agent_id]
+        return (agent_hits or hits)[:2]
 
     @abstractmethod
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:

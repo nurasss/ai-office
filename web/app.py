@@ -97,7 +97,11 @@ async def notify_agent_completion(
     )
 
 
-async def run_pmo_dispatch(message: str) -> dict[str, object]:
+async def run_pmo_dispatch(
+    message: str,
+    *,
+    notify_telegram_enabled: bool = False,
+) -> dict[str, object]:
     """PMO routes the task and returns the selected agent's user-facing answer."""
     pmo = get_agent("pmo")
     route_result = await pmo.process({
@@ -117,13 +121,15 @@ async def run_pmo_dispatch(message: str) -> dict[str, object]:
     result = await run_agent_text_task(target_agent_id, message)
     response_text = result["result"]
     task_id = result["task_id"]
-    telegram_sent = await notify_agent_completion(
-        target_agent_id,
-        message,
-        response_text,
-        task_id,
-        routed_by_pmo=True,
-    )
+    telegram_sent = False
+    if notify_telegram_enabled:
+        telegram_sent = await notify_agent_completion(
+            target_agent_id,
+            message,
+            response_text,
+            task_id,
+            routed_by_pmo=True,
+        )
 
     return {
         "agent_id": "pmo",
@@ -143,7 +149,11 @@ async def run_agent_text_task(agent_id: str, message: str) -> dict[str, str]:
         raise ValueError(f"Неизвестный агент: {agent_id}")
 
     task_id = f"web_{uuid.uuid4().hex[:8]}"
-    response_text = await agent.process_task(message, use_tools=False)
+    response_text = await agent.process_task(
+        message,
+        use_tools=False,
+        max_tokens=1200,
+    )
     response_text = str(response_text or "").strip()
     if not response_text:
         raise RuntimeError(
@@ -222,6 +232,7 @@ async def chat(request: Request):
     data = await request.json()
     agent_id = data.get("agent_id", "pmo")
     message = data.get("message", "").strip()
+    notify_telegram_enabled = bool(data.get("notify_telegram", False))
 
     if not message:
         return JSONResponse({"error": "Пустое сообщение"}, status_code=400)
@@ -234,17 +245,24 @@ async def chat(request: Request):
 
     try:
         if agent_id == "pmo":
-            return JSONResponse(await run_pmo_dispatch(message))
+            return JSONResponse(
+                await run_pmo_dispatch(
+                    message,
+                    notify_telegram_enabled=notify_telegram_enabled,
+                )
+            )
 
         result = await run_agent_text_task(agent_id, message)
         response_text = result["result"]
         task_id = result["task_id"]
-        telegram_sent = await notify_agent_completion(
-            agent_id,
-            message,
-            response_text,
-            task_id,
-        )
+        telegram_sent = False
+        if notify_telegram_enabled:
+            telegram_sent = await notify_agent_completion(
+                agent_id,
+                message,
+                response_text,
+                task_id,
+            )
 
         return JSONResponse({
             "agent_id": agent_id,

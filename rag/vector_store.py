@@ -46,10 +46,23 @@ class LocalJsonVectorStore(BaseVectorStore):
 
     def __init__(self, path: Optional[Path] = None) -> None:
         self.path = path or DEFAULT_LOCAL_STORE_PATH
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._writable = True
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            self._writable = False
+            logger.warning(
+                "local_json.read_only",
+                path=str(self.path),
+                error=str(error),
+            )
 
     async def upsert(self, documents: list[dict[str, Any]]) -> None:
         """Добавить или обновить документы в JSONL-файле."""
+        if not self._writable:
+            logger.warning("local_json.upsert_skipped_read_only", path=str(self.path))
+            return
+
         existing = {document["id"]: document for document in self._read_documents()}
         for document in documents:
             document_id = document.get("id")
@@ -97,6 +110,10 @@ class LocalJsonVectorStore(BaseVectorStore):
 
     async def delete(self, ids: list[str]) -> None:
         """Удалить документы по ID."""
+        if not self._writable:
+            logger.warning("local_json.delete_skipped_read_only", path=str(self.path))
+            return
+
         ids_to_delete = set(ids)
         remaining = [
             document
