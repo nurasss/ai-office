@@ -1,12 +1,13 @@
 """FastAPI веб-интерфейс для AI Office."""
 
+import uuid
+from typing import Optional
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from tenacity import RetryError
-from typing import Optional
 
 from agents import (
     AccountantAgent,
@@ -67,12 +68,7 @@ def get_agent(agent_id: str):
 
 
 def format_error(error: Exception) -> str:
-    """Раскрыть RetryError и вернуть понятную пользователю причину."""
-    if isinstance(error, RetryError):
-        last_error = error.last_attempt.exception()
-        if last_error:
-            return format_error(last_error)
-
+    """Преобразовать ошибку в понятное сообщение."""
     message = str(error).strip()
     return message.strip('"') or error.__class__.__name__
 
@@ -118,9 +114,9 @@ async def run_pmo_dispatch(message: str) -> dict[str, object]:
     if not target_agent:
         raise ValueError(f"PMO выбрал неизвестного агента: {target_agent_id}")
 
-    result = await target_agent.invoke(message)
-    response_text = result.get("result", "")
-    task_id = result.get("task_id", "")
+    result = await run_agent_text_task(target_agent_id, message)
+    response_text = result["result"]
+    task_id = result["task_id"]
     telegram_sent = await notify_agent_completion(
         target_agent_id,
         message,
@@ -137,6 +133,26 @@ async def run_pmo_dispatch(message: str) -> dict[str, object]:
         "task_id": task_id,
         "telegram_notified": telegram_sent,
         "status": "ok",
+    }
+
+
+async def run_agent_text_task(agent_id: str, message: str) -> dict[str, str]:
+    """Run an agent for web chat and force a plain text model answer."""
+    agent = get_agent(agent_id)
+    if not agent:
+        raise ValueError(f"Неизвестный агент: {agent_id}")
+
+    task_id = f"web_{uuid.uuid4().hex[:8]}"
+    response_text = await agent.process_task(message, use_tools=False)
+    response_text = str(response_text or "").strip()
+    if not response_text:
+        raise RuntimeError(
+            "Модель вернула пустой ответ. Попробуйте повторить запрос или проверить API-ключ модели."
+        )
+
+    return {
+        "task_id": task_id,
+        "result": response_text,
     }
 
 
@@ -220,9 +236,9 @@ async def chat(request: Request):
         if agent_id == "pmo":
             return JSONResponse(await run_pmo_dispatch(message))
 
-        result = await agent.invoke(message)
-        response_text = result.get("result", "")
-        task_id = result.get("task_id", "")
+        result = await run_agent_text_task(agent_id, message)
+        response_text = result["result"]
+        task_id = result["task_id"]
         telegram_sent = await notify_agent_completion(
             agent_id,
             message,

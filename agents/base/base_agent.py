@@ -14,6 +14,7 @@ from core.config import load_agent_config
 from core.llm_router import AgentConfig, LLMRouter
 from core.logger import get_logger
 from memory import LongTermMemoryStore, format_memory_context
+from rag.knowledge_files import format_knowledge_file_context, search_knowledge_files
 from rag.retriever import Retriever
 
 logger = get_logger("agents.base")
@@ -110,6 +111,7 @@ class BaseAgent(ABC):
         context: Optional[dict[str, Any]] = None,
         *,
         use_heavy: bool = False,
+        use_tools: bool = True,
         remember: bool = True,
     ) -> dict[str, Any]:
         """Выполнить задачу — основной метод агента.
@@ -118,6 +120,7 @@ class BaseAgent(ABC):
             task: текст задачи.
             context: дополнительный контекст от других агентов.
             use_heavy: использовать тяжёлую модель.
+            use_tools: привязать инструменты к модели.
             remember: записать успешное решение в long-term memory.
 
         Returns:
@@ -136,6 +139,7 @@ class BaseAgent(ABC):
                 task,
                 context=context,
                 use_heavy=use_heavy,
+                use_tools=use_tools,
             )
         except Exception as e:
             logger.error("agent.invoke.error", agent_id=self.agent_id, error=str(e))
@@ -219,6 +223,20 @@ class BaseAgent(ABC):
 
         if rag_documents:
             blocks.append(self._format_rag_context(rag_documents))
+
+        try:
+            knowledge_hits = search_knowledge_files(self.agent_id, task, top_k=3)
+        except Exception as error:
+            logger.warning(
+                "agent.knowledge_file_context.failed",
+                agent_id=self.agent_id,
+                error=str(error),
+            )
+            knowledge_hits = []
+
+        knowledge_context = format_knowledge_file_context(knowledge_hits)
+        if knowledge_context:
+            blocks.append(knowledge_context)
 
         try:
             memory_events = self.memory.search(agent_id=self.agent_id, query=task)

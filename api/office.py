@@ -153,7 +153,11 @@ async def submit_office_task(request: OfficeTaskRequest) -> OfficeTaskResponse:
     )
 
     try:
-        result = await agent.process_task(request.task, rag_context=rag_context)
+        result = await agent.process_task(
+            request.task,
+            rag_context=rag_context,
+            use_tools=False,
+        )
     except MissingLLMCredentialsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
