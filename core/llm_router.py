@@ -48,38 +48,38 @@ class MissingLLMCredentialsError(RuntimeError):
 AGENT_MODEL_POOLS: dict[str, ModelPool] = {
     "pmo": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-4o-mini",
-        heavy_model="gpt-4o",
+        default_model="gpt-5.5",
+        heavy_model="gpt-5.5",
     ),
     "data_analyst": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-4o-mini",
-        heavy_model="gpt-4o",
+        default_model="gpt-5.5",
+        heavy_model="gpt-5.5",
     ),
     "developer": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-4o-mini",
-        heavy_model="gpt-4o",
+        default_model="gpt-5.5",
+        heavy_model="gpt-5.5",
     ),
     "copywriter": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-4o-mini",
-        heavy_model="gpt-4o",
+        default_model="gpt-5.5",
+        heavy_model="gpt-5.5",
     ),
     "support": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-4o-mini",
-        heavy_model="gpt-4o",  # L2 escalation → heavy
+        default_model="gpt-5.5",
+        heavy_model="gpt-5.5",  # L2 escalation → heavy
     ),
     "strategist": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-4o-mini",
-        heavy_model="gpt-4o",
+        default_model="gpt-5.5",
+        heavy_model="gpt-5.5",
     ),
     "accountant": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-4o-mini",
-        heavy_model="gpt-4o",  # Аудит математики → heavy
+        default_model="gpt-5.5",
+        heavy_model="gpt-5.5",  # Аудит математики → heavy
     ),
 }
 

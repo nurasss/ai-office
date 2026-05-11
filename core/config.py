@@ -28,10 +28,10 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     google_api_key: str = Field(default="", validation_alias="GOOGLE_API_KEY")
     openai_default_model: str = Field(
-        default="gpt-4o-mini", validation_alias="OPENAI_DEFAULT_MODEL"
+        default="gpt-5.5", validation_alias="OPENAI_DEFAULT_MODEL"
     )
     openai_heavy_model: str = Field(
-        default="gpt-4o", validation_alias="OPENAI_HEAVY_MODEL"
+        default="gpt-5.5", validation_alias="OPENAI_HEAVY_MODEL"
     )
 
     # ── Vector DB ──────────────────────────────────────────────────────
