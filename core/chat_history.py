@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -55,8 +57,23 @@ class ChatHistoryStore:
     """Simple JSON-backed conversation storage."""
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self.base_dir = base_dir or CHAT_HISTORY_DIR
+        self.base_dir = self._resolve_storage_dir(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _resolve_storage_dir(self, base_dir: Path | None) -> Path:
+        """Use the requested directory when writable, otherwise fall back to tmp."""
+        candidate = Path(base_dir) if base_dir else CHAT_HISTORY_DIR
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write_test"
+            with open(probe, "w", encoding="utf-8") as handle:
+                handle.write("ok")
+            os.remove(probe)
+            return candidate
+        except OSError:
+            fallback = Path(tempfile.gettempdir()) / "ai-office" / "chat_history"
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback
 
     def list_conversations(self) -> list[dict[str, Any]]:
         """Return lightweight metadata for all conversations."""
