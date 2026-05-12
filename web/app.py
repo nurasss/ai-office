@@ -18,6 +18,7 @@ from agents import (
     StrategistAgent,
     SupportAgent,
 )
+from core.chat_history import ChatHistoryStore, ChatMessage, utc_now_iso
 from core.llm_router import MissingLLMCredentialsError
 from core.logger import get_logger, setup_logging
 from tools.external.telegram import send_telegram_message
@@ -37,6 +38,7 @@ templates = Jinja2Templates(directory="templates")
 
 # ── Кэш агентов (lazy init) ──────────────────────────────────────────
 _agents: dict[str, object] = {}
+chat_store = ChatHistoryStore()
 
 AGENT_NAMES = {
     "pmo": "PMO",
@@ -100,13 +102,15 @@ async def notify_agent_completion(
 async def run_pmo_dispatch(
     message: str,
     *,
+    conversation_history: Optional[list[dict[str, object]]] = None,
     notify_telegram_enabled: bool = False,
 ) -> dict[str, object]:
     """PMO routes the task and returns the selected agent's user-facing answer."""
+    route_task = _build_chat_prompt(message, conversation_history or [])
     pmo = get_agent("pmo")
     route_result = await pmo.process({
-        "current_task": message,
-        "messages": [],
+        "current_task": route_task,
+        "messages": conversation_history or [],
         "subtasks": [],
     })
 
@@ -118,7 +122,11 @@ async def run_pmo_dispatch(
     if not target_agent:
         raise ValueError(f"PMO выбрал неизвестного агента: {target_agent_id}")
 
-    result = await run_agent_text_task(target_agent_id, message)
+    result = await run_agent_text_task(
+        target_agent_id,
+        message,
+        conversation_history=conversation_history,
+    )
     response_text = result["result"]
     task_id = result["task_id"]
     telegram_sent = False
@@ -142,7 +150,12 @@ async def run_pmo_dispatch(
     }
 
 
-async def run_agent_text_task(agent_id: str, message: str) -> dict[str, str]:
+async def run_agent_text_task(
+    agent_id: str,
+    message: str,
+    *,
+    conversation_history: Optional[list[dict[str, object]]] = None,
+) -> dict[str, str]:
     """Run an agent for web chat and force a plain text model answer."""
     agent = get_agent(agent_id)
     if not agent:
@@ -151,6 +164,7 @@ async def run_agent_text_task(agent_id: str, message: str) -> dict[str, str]:
     task_id = f"web_{uuid.uuid4().hex[:8]}"
     response_text = await agent.process_task(
         message,
+        chat_history=conversation_history or [],
         use_tools=False,
         max_tokens=2400,
     )
@@ -163,6 +177,38 @@ async def run_agent_text_task(agent_id: str, message: str) -> dict[str, str]:
     return {
         "task_id": task_id,
         "result": response_text,
+    }
+
+
+def _build_chat_prompt(message: str, conversation_history: list[dict[str, object]]) -> str:
+    """Combine recent user context for lightweight PMO routing."""
+    prior_user_turns = [
+        str(item.get("text", "")).strip()
+        for item in conversation_history[-8:]
+        if str(item.get("role", "")).strip() == "user" and str(item.get("text", "")).strip()
+    ]
+    if not prior_user_turns:
+        return message
+
+    context_block = "\n".join(f"- {turn}" for turn in prior_user_turns[:-1])
+    if not context_block:
+        return message
+    return (
+        "История пользовательских сообщений:\n"
+        f"{context_block}\n\n"
+        f"Текущий запрос:\n{message}"
+    )
+
+
+def _serialize_conversation(conversation: dict[str, object]) -> dict[str, object]:
+    """Normalize conversation payload for JSON responses."""
+    return {
+        "id": conversation.get("id"),
+        "title": conversation.get("title", "Новый диалог"),
+        "agent_id": conversation.get("agent_id", "pmo"),
+        "created_at": conversation.get("created_at"),
+        "updated_at": conversation.get("updated_at"),
+        "messages": conversation.get("messages", []),
     }
 
 
@@ -185,10 +231,11 @@ async def index(request: Request):
         {"id": "strategist", "name": "Стратег", "icon": "🎯", "desc": "Анализ рынка"},
         {"id": "accountant", "name": "Бухгалтер", "icon": "🧮", "desc": "Финансы"},
     ]
+    conversations = chat_store.list_conversations()
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"agents": agents_list},
+        context={"agents": agents_list, "conversations": conversations},
     )
 
 
@@ -232,46 +279,89 @@ async def chat(request: Request):
     data = await request.json()
     agent_id = data.get("agent_id", "pmo")
     message = data.get("message", "").strip()
+    conversation_id = str(data.get("conversation_id", "")).strip()
     notify_telegram_enabled = bool(data.get("notify_telegram", False))
 
     if not message:
         return JSONResponse({"error": "Пустое сообщение"}, status_code=400)
 
+    if not conversation_id:
+        conversation = chat_store.create_conversation(agent_id=agent_id)
+        conversation_id = str(conversation["id"])
+
+    conversation = chat_store.get_conversation(conversation_id)
+    if not conversation:
+        return JSONResponse({"error": "Диалог не найден"}, status_code=404)
+
+    chat_store.touch_conversation(conversation_id, agent_id=agent_id)
     agent = get_agent(agent_id)
     if not agent:
         return JSONResponse({"error": f"Неизвестный агент: {agent_id}"}, status_code=404)
+
+    history_for_prompt = chat_store.recent_context(conversation_id, limit=12)
+    chat_store.append_message(
+        conversation_id,
+        ChatMessage(
+            role="user",
+            text=message,
+            created_at=utc_now_iso(),
+        ),
+    )
 
     logger.info("web.chat", agent_id=agent_id, message=message[:100])
 
     try:
         if agent_id == "pmo":
-            return JSONResponse(
-                await run_pmo_dispatch(
+            result_payload = await run_pmo_dispatch(
                     message,
+                    conversation_history=history_for_prompt,
                     notify_telegram_enabled=notify_telegram_enabled,
                 )
-            )
-
-        result = await run_agent_text_task(agent_id, message)
-        response_text = result["result"]
-        task_id = result["task_id"]
-        telegram_sent = False
-        if notify_telegram_enabled:
-            telegram_sent = await notify_agent_completion(
+            handled_by = str(result_payload.get("handled_by", "pmo"))
+        else:
+            result = await run_agent_text_task(
                 agent_id,
                 message,
-                response_text,
-                task_id,
+                conversation_history=history_for_prompt,
             )
+            response_text = result["result"]
+            task_id = result["task_id"]
+            telegram_sent = False
+            if notify_telegram_enabled:
+                telegram_sent = await notify_agent_completion(
+                    agent_id,
+                    message,
+                    response_text,
+                    task_id,
+                )
 
+            result_payload = {
+                "agent_id": agent_id,
+                "handled_by": agent_id,
+                "handled_by_name": AGENT_NAMES.get(agent_id, agent_id),
+                "result": response_text,
+                "task_id": task_id,
+                "telegram_notified": telegram_sent,
+                "status": "ok",
+            }
+            handled_by = agent_id
+
+        chat_store.append_message(
+            conversation_id,
+            ChatMessage(
+                role="assistant",
+                text=str(result_payload.get("result", "")),
+                created_at=utc_now_iso(),
+                agent_id=agent_id,
+                handled_by=handled_by,
+                task_id=str(result_payload.get("task_id", "")) or None,
+            )
+        )
+        updated_conversation = chat_store.get_conversation(conversation_id)
         return JSONResponse({
-            "agent_id": agent_id,
-            "handled_by": agent_id,
-            "handled_by_name": AGENT_NAMES.get(agent_id, agent_id),
-            "result": response_text,
-            "task_id": task_id,
-            "telegram_notified": telegram_sent,
-            "status": "ok",
+            **result_payload,
+            "conversation_id": conversation_id,
+            "conversation": _serialize_conversation(updated_conversation or conversation),
         })
     except MissingLLMCredentialsError as e:
         error_message = format_error(e)
@@ -287,6 +377,39 @@ async def chat(request: Request):
             "error": error_message,
             "status": "error",
         }, status_code=500)
+
+
+@app.get("/api/conversations")
+async def list_conversations():
+    """Return recent conversations for the web UI."""
+    return JSONResponse({
+        "conversations": chat_store.list_conversations(),
+        "status": "ok",
+    })
+
+
+@app.post("/api/conversations")
+async def create_conversation(request: Request):
+    """Create a new empty conversation."""
+    data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    agent_id = str(data.get("agent_id", "pmo")).strip() or "pmo"
+    conversation = chat_store.create_conversation(agent_id=agent_id)
+    return JSONResponse({
+        "conversation": _serialize_conversation(conversation),
+        "status": "ok",
+    })
+
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    """Load a conversation with all messages."""
+    conversation = chat_store.get_conversation(conversation_id)
+    if not conversation:
+        return JSONResponse({"error": "Диалог не найден"}, status_code=404)
+    return JSONResponse({
+        "conversation": _serialize_conversation(conversation),
+        "status": "ok",
+    })
 
 
 # ── API: маршрутизация через PMO ─────────────────────────────────────

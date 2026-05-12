@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 import yaml
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from core.config import load_agent_config
@@ -176,6 +176,7 @@ class BaseAgent(ABC):
         task: str,
         rag_context: str = "",
         context: Optional[dict[str, Any]] = None,
+        chat_history: Optional[list[dict[str, Any]]] = None,
         *,
         use_heavy: bool = False,
         use_tools: bool = True,
@@ -206,6 +207,9 @@ class BaseAgent(ABC):
                 HumanMessage(content=f"Контекст от других агентов:\n{context}")
             )
 
+        if chat_history:
+            messages.extend(self._format_chat_history(chat_history))
+
         messages.append(HumanMessage(content=f"Выполни задачу:\n{task}"))
 
         return await self._invoke_text_model(
@@ -214,6 +218,35 @@ class BaseAgent(ABC):
             use_tools=use_tools,
             max_tokens=max_tokens,
         )
+
+    def _format_chat_history(
+        self,
+        chat_history: list[dict[str, Any]],
+    ) -> list[BaseMessage]:
+        """Convert stored chat turns to LangChain messages."""
+        messages: list[BaseMessage] = [
+            SystemMessage(
+                content=(
+                    "Ниже история текущего диалога. Учитывай её как рабочий контекст, "
+                    "не теряй имена, числа, ограничения и предыдущие договорённости."
+                )
+            )
+        ]
+
+        for item in chat_history:
+            role = str(item.get("role", "")).strip()
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+
+            if role == "user":
+                messages.append(HumanMessage(content=text))
+                continue
+
+            handled_by = str(item.get("handled_by") or item.get("agent_id") or "assistant")
+            messages.append(AIMessage(content=f"[{handled_by}] {text}"))
+
+        return messages
 
     async def _invoke_text_model(
         self,
