@@ -2,8 +2,8 @@
 agents:
   pmo:
     model_provider: openai
-    model_default: gpt-5.5
-    model_heavy: gpt-5.5
+    model_default: gpt-5.4
+    model_heavy: gpt-5.4
     temperature: 0.1
     max_tokens: 4096
     max_iterations: 10
@@ -29,15 +29,15 @@ agents:
 
   copywriter:
     model_provider: openai
-    model_default: gpt-5.5
-    model_heavy: gpt-5.5
+    model_default: gpt-5.4
+    model_heavy: gpt-5.4
     temperature: 0.3
     max_tokens: 4096
     rag_namespace: agent_copywriter
 
   support:
     model_provider: openai
-    model_default: gpt-5.5
+    model_default: gpt-5.4
     model_heavy: gpt-5.5
     temperature: 0.1
     max_tokens: 4096

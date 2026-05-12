@@ -48,8 +48,8 @@ class MissingLLMCredentialsError(RuntimeError):
 AGENT_MODEL_POOLS: dict[str, ModelPool] = {
     "pmo": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-5.5",
-        heavy_model="gpt-5.5",
+        default_model="gpt-5.4",
+        heavy_model="gpt-5.4",
     ),
     "data_analyst": ModelPool(
         provider=Provider.OPENAI,
@@ -63,12 +63,12 @@ AGENT_MODEL_POOLS: dict[str, ModelPool] = {
     ),
     "copywriter": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-5.5",
-        heavy_model="gpt-5.5",
+        default_model="gpt-5.4",
+        heavy_model="gpt-5.4",
     ),
     "support": ModelPool(
         provider=Provider.OPENAI,
-        default_model="gpt-5.5",
+        default_model="gpt-5.4",
         heavy_model="gpt-5.5",  # L2 escalation → heavy
     ),
     "strategist": ModelPool(
@@ -179,14 +179,7 @@ class LLMRouter:
 
         pool = self._get_agent_pool(agent_id)
 
-        if pool.provider == Provider.OPENAI:
-            model_name = (
-                self._settings.openai_heavy_model
-                if use_heavy
-                else self._settings.openai_default_model
-            ).strip()
-        else:
-            model_name = pool.heavy_model if use_heavy else pool.default_model
+        model_name = (pool.heavy_model if use_heavy else pool.default_model).strip()
 
         api_key, env_var = self._get_provider_key(pool.provider)
         if not api_key:

@@ -25,7 +25,7 @@ class OfficeState(TypedDict, total=False):
     next_node: str
 
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = ChatOpenAI(model="gpt-5.4", temperature=0)
 
 
 def pmo_node(state: OfficeState) -> OfficeState:
