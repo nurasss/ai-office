@@ -36,10 +36,11 @@ def telegram_update(
     chat_id: int = 123,
     message_id: int = 7,
     message_thread_id: int | None = None,
+    chat_type: str = "group",
 ):
     message = {
         "message_id": message_id,
-        "chat": {"id": chat_id, "type": "group"},
+        "chat": {"id": chat_id, "type": chat_type},
         "text": text,
     }
     if message_thread_id is not None:
@@ -87,12 +88,60 @@ def test_agent_webhook_uses_agent_as_default(tmp_path, monkeypatch):
     client = TestClient(web_app.app)
     response = client.post(
         "/api/telegram/webhook/developer",
-        json=telegram_update("проверь код"),
+        json=telegram_update("проверь код", chat_type="private"),
     )
 
     assert response.status_code == 200
     assert response.json()["agent_id"] == "developer"
     assert any("done:проверь код" in text for _, text in sent_messages)
+
+
+def test_specialist_group_webhook_ignores_unbound_general_message(tmp_path, monkeypatch):
+    sent_messages: list[tuple[str, str]] = []
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append((str(chat_id), text))
+        return True
+
+    monkeypatch.setattr(web_app, "chat_store", ChatHistoryStore(tmp_path))
+    monkeypatch.setattr(web_app, "_agents", {"developer": FakeAgent()})
+    monkeypatch.setattr(web_app, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+
+    client = TestClient(web_app.app)
+    response = client.post(
+        "/api/telegram/webhook/developer",
+        json=telegram_update("проверь код"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["agent_id"] == "developer"
+    assert sent_messages == []
+
+
+def test_specialist_group_webhook_accepts_own_topic(tmp_path, monkeypatch):
+    class TopicSettings(FakeSettings):
+        telegram_developer_thread_id = "42"
+
+    sent_messages: list[dict[str, object]] = []
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append({"chat_id": str(chat_id), "text": text, **kwargs})
+        return True
+
+    monkeypatch.setattr(web_app, "chat_store", ChatHistoryStore(tmp_path))
+    monkeypatch.setattr(web_app, "_agents", {"developer": FakeAgent()})
+    monkeypatch.setattr(web_app, "get_settings", lambda: TopicSettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+
+    client = TestClient(web_app.app)
+    response = client.post(
+        "/api/telegram/webhook/developer",
+        json=telegram_update("проверь код", message_thread_id=42),
+    )
+
+    assert response.status_code == 200
+    assert any("done:проверь код" in str(message["text"]) for message in sent_messages)
 
 
 def test_pmo_routes_general_message_to_agent_topic(tmp_path, monkeypatch):
@@ -128,6 +177,36 @@ def test_pmo_routes_general_message_to_agent_topic(tmp_path, monkeypatch):
         and message.get("message_thread_id") == 42
         for message in sent_messages
     )
+
+
+def test_pmo_ignores_specialist_topic_plain_message(tmp_path, monkeypatch):
+    class TopicSettings(FakeSettings):
+        telegram_general_thread_id = "1"
+        telegram_developer_thread_id = "42"
+
+    sent_messages: list[dict[str, object]] = []
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append({"chat_id": str(chat_id), "text": text, **kwargs})
+        return True
+
+    monkeypatch.setattr(web_app, "chat_store", ChatHistoryStore(tmp_path))
+    monkeypatch.setattr(
+        web_app,
+        "_agents",
+        {"pmo": FakePMOAgent("developer"), "developer": FakeAgent()},
+    )
+    monkeypatch.setattr(web_app, "get_settings", lambda: TopicSettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+
+    client = TestClient(web_app.app)
+    response = client.post(
+        "/api/telegram/webhook/pmo",
+        json=telegram_update("проверь код", message_thread_id=42),
+    )
+
+    assert response.status_code == 200
+    assert sent_messages == []
 
 
 def test_bind_command_saves_current_topic(tmp_path, monkeypatch):

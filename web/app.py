@@ -374,6 +374,50 @@ def _normalize_telegram_topic_name(raw_name: str) -> str | None:
     return TELEGRAM_AGENT_ALIASES.get(key)
 
 
+def _is_telegram_group_chat(chat: dict[str, object]) -> bool:
+    """Return whether this update came from a shared Telegram chat."""
+    return str(chat.get("type", "")).strip().lower() in {"group", "supergroup", "channel"}
+
+
+def _should_ignore_specialist_group_update(
+    *,
+    default_agent_id: str,
+    chat: dict[str, object],
+    chat_id: str | int,
+    source_thread_id: int | None,
+) -> bool:
+    """Keep specialist bots quiet in shared chats unless the message is in their topic."""
+    if default_agent_id == "pmo" or not _is_telegram_group_chat(chat):
+        return False
+
+    bound_thread_id = _resolve_telegram_thread_id(chat_id, default_agent_id)
+    if bound_thread_id is None or source_thread_id is None:
+        return True
+    return bound_thread_id != source_thread_id
+
+
+def _should_ignore_pmo_topic_update(
+    *,
+    command: str | None,
+    chat: dict[str, object],
+    chat_id: str | int,
+    source_thread_id: int | None,
+) -> bool:
+    """Keep PMO focused on General while specialists handle their own topics."""
+    if command is not None or not _is_telegram_group_chat(chat) or source_thread_id is None:
+        return False
+
+    general_thread_id = _resolve_telegram_thread_id(chat_id, "general")
+    if general_thread_id is not None:
+        return source_thread_id != general_thread_id
+
+    for specialist_id in SPECIALIST_AGENT_IDS:
+        specialist_thread_id = _resolve_telegram_thread_id(chat_id, specialist_id)
+        if specialist_thread_id == source_thread_id:
+            return True
+    return False
+
+
 def _parse_telegram_agent_command(
     command: str | None,
     body: str,
@@ -679,6 +723,8 @@ async def process_telegram_update(
 
     command, body = _normalize_telegram_command(text)
     if command == "bind":
+        if default_agent_id != "pmo":
+            return
         topic_name = _normalize_telegram_topic_name(body)
         if not topic_name:
             await send_telegram_message_to(
@@ -708,12 +754,29 @@ async def process_telegram_update(
         )
         return
 
+    if default_agent_id == "pmo" and _should_ignore_pmo_topic_update(
+        command=command,
+        chat=chat,
+        chat_id=chat_id,
+        source_thread_id=source_thread_id,
+    ):
+        return
+
     agent_id, task, run_all = _parse_telegram_agent_command(
         command,
         body,
         default_agent_id=default_agent_id,
     )
+    if _should_ignore_specialist_group_update(
+        default_agent_id=default_agent_id,
+        chat=chat,
+        chat_id=chat_id,
+        source_thread_id=source_thread_id,
+    ):
+        return
     if agent_id == "help":
+        if default_agent_id != "pmo" and _is_telegram_group_chat(chat):
+            return
         await send_telegram_message_to(
             chat_id,
             _telegram_help_text(),
@@ -723,6 +786,8 @@ async def process_telegram_update(
         )
         return
     if agent_id == "agents":
+        if default_agent_id != "pmo" and _is_telegram_group_chat(chat):
+            return
         await send_telegram_message_to(
             chat_id,
             _telegram_agents_text(),
