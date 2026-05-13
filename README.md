@@ -21,7 +21,7 @@
 ## Быстрый старт
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
@@ -62,8 +62,39 @@ ai_office/
 Источники знаний описаны в `config/knowledge_sources.yaml`. Каждый агент индексируется в отдельный namespace, а общая корпоративная память хранится отдельно в `common_corporate`.
 
 ```bash
-python scripts/ingest_knowledge.py --agent all --include-common --dry-run
-python scripts/ingest_knowledge.py --agent pmo --include-common
+python3 scripts/ingest_knowledge.py --agent all --include-common --dry-run
+python3 scripts/ingest_knowledge.py --agent pmo --include-common
 ```
 
 Подробная программа обучения: `docs/AGENT_TRAINING_PLAN.md`.
+
+Для локального smoke-прогона без Postgres используется `local_json` backend:
+
+```bash
+python3 scripts/ingest_knowledge.py --agent all --include-common
+python3 scripts/smoke_first_task.py
+```
+
+Если API-ключи еще не настроены, можно проверить только маршрутизацию и RAG:
+
+```bash
+python3 scripts/smoke_first_task.py --route-only
+```
+
+## Product API
+
+Основной endpoint для веба, Telegram-бота или Mini App:
+
+```bash
+curl -X POST http://localhost:8000/api/office/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","agent_id":"pmo"}'
+```
+
+Проверить только маршрут и RAG без LLM-вызова:
+
+```bash
+curl -X POST http://localhost:8000/api/office/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","route_only":true}'
+```

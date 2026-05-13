@@ -28,10 +28,10 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     google_api_key: str = Field(default="", validation_alias="GOOGLE_API_KEY")
     openai_default_model: str = Field(
-        default="gpt-4o-mini", validation_alias="OPENAI_DEFAULT_MODEL"
+        default="gpt-5.4", validation_alias="OPENAI_DEFAULT_MODEL"
     )
     openai_heavy_model: str = Field(
-        default="gpt-4o", validation_alias="OPENAI_HEAVY_MODEL"
+        default="gpt-5.5", validation_alias="OPENAI_HEAVY_MODEL"
     )
 
     # ── Vector DB ──────────────────────────────────────────────────────
@@ -46,7 +46,55 @@ class Settings(BaseSettings):
     # ── External Tools ─────────────────────────────────────────────────
     slack_bot_token: str = Field(default="", validation_alias="SLACK_BOT_TOKEN")
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
+    telegram_pmo_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_PMO_BOT_TOKEN"
+    )
+    telegram_data_analyst_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_DATA_ANALYST_BOT_TOKEN"
+    )
+    telegram_developer_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_DEVELOPER_BOT_TOKEN"
+    )
+    telegram_copywriter_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_COPYWRITER_BOT_TOKEN"
+    )
+    telegram_support_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_SUPPORT_BOT_TOKEN"
+    )
+    telegram_strategist_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_STRATEGIST_BOT_TOKEN"
+    )
+    telegram_accountant_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_ACCOUNTANT_BOT_TOKEN"
+    )
     telegram_chat_id: str = Field(default="", validation_alias="TELEGRAM_CHAT_ID")
+    telegram_webhook_secret: str = Field(
+        default="", validation_alias="TELEGRAM_WEBHOOK_SECRET"
+    )
+    telegram_general_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_GENERAL_THREAD_ID"
+    )
+    telegram_pmo_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_PMO_THREAD_ID"
+    )
+    telegram_data_analyst_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_DATA_ANALYST_THREAD_ID"
+    )
+    telegram_developer_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_DEVELOPER_THREAD_ID"
+    )
+    telegram_copywriter_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_COPYWRITER_THREAD_ID"
+    )
+    telegram_support_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_SUPPORT_THREAD_ID"
+    )
+    telegram_strategist_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_STRATEGIST_THREAD_ID"
+    )
+    telegram_accountant_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_ACCOUNTANT_THREAD_ID"
+    )
     github_token: str = Field(default="", validation_alias="GITHUB_TOKEN")
     jira_url: str = Field(default="", validation_alias="JIRA_URL")
     jira_user: str = Field(default="", validation_alias="JIRA_USER")

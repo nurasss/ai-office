@@ -7,13 +7,15 @@ from typing import Any, Optional
 
 import yaml
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from core.config import load_agent_config
 from core.llm_router import AgentConfig, LLMRouter
 from core.logger import get_logger
 from memory import LongTermMemoryStore, format_memory_context
+from rag.knowledge_files import format_knowledge_file_context, search_knowledge_files
+from rag.namespaces import get_agent_profile
 from rag.retriever import Retriever
 
 logger = get_logger("agents.base")
@@ -72,15 +74,31 @@ class BaseAgent(ABC):
 
         return data.get("system_prompt", "")
 
-    def get_model(self, *, use_heavy: bool = False) -> BaseChatModel:
+    def get_model(
+        self,
+        *,
+        use_heavy: bool = False,
+        bind_tools: bool = True,
+        max_tokens: Optional[int] = None,
+    ) -> BaseChatModel:
         """Получить LLM-модель через роутер."""
+        effective_max_tokens = self.max_tokens if max_tokens is None else max_tokens
+
+        if not bind_tools:
+            return self.router.get_model(
+                self.agent_id,
+                use_heavy=use_heavy,
+                temperature=self.temperature,
+                max_tokens=effective_max_tokens,
+            )
+
         if self._model is None:
             config = AgentConfig(
                 agent_id=self.agent_id,
                 system_prompt=self.system_prompt,
                 tools=self.tools,
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=effective_max_tokens,
             )
             self._model = self.router.build_agent(config, use_heavy=use_heavy)
         return self._model
@@ -97,6 +115,7 @@ class BaseAgent(ABC):
         context: Optional[dict[str, Any]] = None,
         *,
         use_heavy: bool = False,
+        use_tools: bool = True,
         remember: bool = True,
     ) -> dict[str, Any]:
         """Выполнить задачу — основной метод агента.
@@ -105,6 +124,7 @@ class BaseAgent(ABC):
             task: текст задачи.
             context: дополнительный контекст от других агентов.
             use_heavy: использовать тяжёлую модель.
+            use_tools: привязать инструменты к модели.
             remember: записать успешное решение в long-term memory.
 
         Returns:
@@ -118,25 +138,13 @@ class BaseAgent(ABC):
             use_heavy=use_heavy,
         )
 
-        messages: list[BaseMessage] = [
-            SystemMessage(content=self.system_prompt),
-        ]
-
-        operational_context = await self._build_operational_context(task)
-        if operational_context:
-            messages.append(HumanMessage(content=operational_context))
-
-        if context:
-            messages.append(
-                HumanMessage(content=f"Контекст от других агентов:\n{context}")
-            )
-
-        messages.append(HumanMessage(content=f"Задача:\n{task}"))
-
-        model = self.get_model(use_heavy=use_heavy)
-
         try:
-            response = await model.ainvoke(messages)
+            response_content = await self.process_task(
+                task,
+                context=context,
+                use_heavy=use_heavy,
+                use_tools=use_tools,
+            )
         except Exception as e:
             logger.error("agent.invoke.error", agent_id=self.agent_id, error=str(e))
             raise
@@ -144,7 +152,7 @@ class BaseAgent(ABC):
         result = {
             "agent_id": self.agent_id,
             "task_id": task_id,
-            "result": response.content,
+            "result": response_content,
             "status": "completed",
         }
 
@@ -152,7 +160,7 @@ class BaseAgent(ABC):
             self._record_success_memory(
                 task_id=task_id,
                 task=task,
-                outcome=str(response.content),
+                outcome=response_content,
             )
 
         logger.info(
@@ -162,6 +170,138 @@ class BaseAgent(ABC):
         )
 
         return result
+
+    async def process_task(
+        self,
+        task: str,
+        rag_context: str = "",
+        context: Optional[dict[str, Any]] = None,
+        chat_history: Optional[list[dict[str, Any]]] = None,
+        *,
+        use_heavy: bool = False,
+        use_tools: bool = True,
+        max_tokens: Optional[int] = None,
+    ) -> str:
+        """Выполнить задачу через реальную LLM с system prompt + RAG context."""
+        messages: list[BaseMessage] = [
+            SystemMessage(content=self.system_prompt),
+        ]
+
+        operational_context = rag_context.strip()
+        if not operational_context:
+            operational_context = await self._build_operational_context(task)
+
+        if operational_context:
+            messages.append(
+                HumanMessage(
+                    content=(
+                        "Используй следующую базу знаний и память для ответа. "
+                        "Если в базе нет ответа, не противоречь найденному контексту.\n\n"
+                        f"БАЗА ЗНАНИЙ:\n{operational_context}"
+                    )
+                )
+            )
+
+        if context:
+            messages.append(
+                HumanMessage(content=f"Контекст от других агентов:\n{context}")
+            )
+
+        if chat_history:
+            messages.extend(self._format_chat_history(chat_history))
+
+        messages.append(HumanMessage(content=f"Выполни задачу:\n{task}"))
+
+        return await self._invoke_text_model(
+            messages,
+            use_heavy=use_heavy,
+            use_tools=use_tools,
+            max_tokens=max_tokens,
+        )
+
+    def _format_chat_history(
+        self,
+        chat_history: list[dict[str, Any]],
+    ) -> list[BaseMessage]:
+        """Convert stored chat turns to LangChain messages."""
+        messages: list[BaseMessage] = [
+            SystemMessage(
+                content=(
+                    "Ниже история текущего диалога. Учитывай её как рабочий контекст, "
+                    "не теряй имена, числа, ограничения и предыдущие договорённости."
+                )
+            )
+        ]
+
+        for item in chat_history:
+            role = str(item.get("role", "")).strip()
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+
+            if role == "user":
+                messages.append(HumanMessage(content=text))
+                continue
+
+            handled_by = str(item.get("handled_by") or item.get("agent_id") or "assistant")
+            messages.append(AIMessage(content=f"[{handled_by}] {text}"))
+
+        return messages
+
+    async def _invoke_text_model(
+        self,
+        messages: list[BaseMessage],
+        *,
+        use_heavy: bool,
+        use_tools: bool,
+        max_tokens: Optional[int],
+    ) -> str:
+        """Invoke the chat model and retry once if a reasoning model returns empty text."""
+        model = self.get_model(
+            use_heavy=use_heavy,
+            bind_tools=use_tools,
+            max_tokens=max_tokens,
+        )
+        response = await model.ainvoke(messages)
+        content = self._stringify_response_content(response.content).strip()
+        if content:
+            return content
+
+        logger.warning(
+            "agent.empty_model_response",
+            agent_id=self.agent_id,
+            response_metadata=getattr(response, "response_metadata", {}),
+            additional_kwargs=getattr(response, "additional_kwargs", {}),
+        )
+
+        retry_max_tokens = max(max_tokens or self.max_tokens, 2400)
+        retry_messages = [
+            *messages,
+            HumanMessage(
+                content=(
+                    "Предыдущий ответ модели был пустым. Верни обычный текстовый ответ. "
+                    "Если в базе знаний нет нужных данных, прямо скажи, каких данных не хватает, "
+                    "и не оставляй ответ пустым."
+                )
+            ),
+        ]
+        retry_model = self.get_model(
+            use_heavy=use_heavy,
+            bind_tools=use_tools,
+            max_tokens=retry_max_tokens,
+        )
+        retry_response = await retry_model.ainvoke(retry_messages)
+        retry_content = self._stringify_response_content(retry_response.content).strip()
+        if retry_content:
+            return retry_content
+
+        logger.warning(
+            "agent.empty_model_response_after_retry",
+            agent_id=self.agent_id,
+            response_metadata=getattr(retry_response, "response_metadata", {}),
+            additional_kwargs=getattr(retry_response, "additional_kwargs", {}),
+        )
+        return ""
 
     async def _build_operational_context(self, task: str) -> str:
         """Collect isolated RAG and memory context for the current agent."""
@@ -178,7 +318,24 @@ class BaseAgent(ABC):
             rag_documents = []
 
         if rag_documents:
+            rag_documents = self._select_rag_documents(rag_documents)
             blocks.append(self._format_rag_context(rag_documents))
+
+        if not self._has_agent_rag_hit(rag_documents):
+            try:
+                knowledge_hits = search_knowledge_files(self.agent_id, task, top_k=3)
+            except Exception as error:
+                logger.warning(
+                    "agent.knowledge_file_context.failed",
+                    agent_id=self.agent_id,
+                    error=str(error),
+                )
+                knowledge_hits = []
+
+            knowledge_hits = self._select_knowledge_hits(knowledge_hits)
+            knowledge_context = format_knowledge_file_context(knowledge_hits)
+            if knowledge_context:
+                blocks.append(knowledge_context)
 
         try:
             memory_events = self.memory.search(agent_id=self.agent_id, query=task)
@@ -231,10 +388,88 @@ class BaseAgent(ABC):
             metadata = document.get("metadata", {})
             source = metadata.get("source") or metadata.get("source_id") or "unknown"
             content = str(document.get("content", "")).strip()
-            if len(content) > 1200:
-                content = f"{content[:1200]}..."
+            source_content = BaseAgent._read_full_knowledge_source(str(source))
+            if source_content:
+                content = source_content
+            if len(content) > 6000:
+                content = f"{content[:6000]}..."
             lines.append(f"[{index}] source={source}\n{content}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _stringify_response_content(content: Any) -> str:
+        """Normalize provider-specific message content into plain text."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = item.get("text") or item.get("content")
+                    if text:
+                        parts.append(str(text))
+            return "\n".join(parts)
+        return str(content or "")
+
+    @staticmethod
+    def _read_full_knowledge_source(source: str) -> str:
+        """Read a full committed knowledge file when RAG points at one."""
+        if not source.startswith("knowledge/"):
+            return ""
+
+        source_path = Path(__file__).resolve().parent.parent.parent / source
+        if not source_path.exists() or not source_path.is_file():
+            return ""
+
+        try:
+            return source_path.read_text(encoding="utf-8").strip()
+        except UnicodeDecodeError:
+            return source_path.read_text(encoding="utf-8", errors="ignore").strip()
+
+    def _has_agent_rag_hit(self, documents: list[dict[str, Any]]) -> bool:
+        """Return True when RAG already found agent-specific knowledge."""
+        if not documents:
+            return False
+
+        agent_namespace = get_agent_profile(self.agent_id)["namespace"]
+        for document in documents:
+            metadata = document.get("metadata", {})
+            if (
+                metadata.get("agent_id") == self.agent_id
+                or metadata.get("namespace") == agent_namespace
+            ):
+                return True
+        return False
+
+    def _select_rag_documents(self, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Prefer agent-owned RAG hits and remove duplicate sources."""
+        agent_namespace = get_agent_profile(self.agent_id)["namespace"]
+        agent_documents = [
+            document
+            for document in documents
+            if document.get("metadata", {}).get("agent_id") == self.agent_id
+            or document.get("metadata", {}).get("namespace") == agent_namespace
+        ]
+        selected = agent_documents or documents
+
+        unique_documents: list[dict[str, Any]] = []
+        seen_sources: set[str] = set()
+        for document in selected:
+            metadata = document.get("metadata", {})
+            source = str(metadata.get("source") or metadata.get("source_id") or "")
+            if source and source in seen_sources:
+                continue
+            if source:
+                seen_sources.add(source)
+            unique_documents.append(document)
+        return unique_documents[:2]
+
+    def _select_knowledge_hits(self, hits: list[Any]) -> list[Any]:
+        """Prefer agent-owned file hits when committed knowledge is used."""
+        agent_hits = [hit for hit in hits if getattr(hit, "agent_id", "") == self.agent_id]
+        return (agent_hits or hits)[:2]
 
     @abstractmethod
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:

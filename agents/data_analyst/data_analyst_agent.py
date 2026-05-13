@@ -66,6 +66,7 @@ class DataAnalystAgent(BaseAgent):
         context: Optional[dict[str, Any]] = None,
         *,
         use_heavy: bool = False,
+        use_tools: bool = True,
         remember: bool = True,
     ) -> dict[str, Any]:
         """Аналитик не выдумывает числа, если пользователь не передал источник данных."""
@@ -94,6 +95,7 @@ class DataAnalystAgent(BaseAgent):
             task,
             context=context,
             use_heavy=use_heavy,
+            use_tools=use_tools,
             remember=remember,
         )
 

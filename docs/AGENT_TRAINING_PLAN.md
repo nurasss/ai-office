@@ -16,15 +16,15 @@
 Проверить, какие файлы будут загружены:
 
 ```bash
-python scripts/ingest_knowledge.py --agent all --include-common --dry-run
+python3 scripts/ingest_knowledge.py --agent all --include-common --dry-run
 ```
 
 Загрузить общие документы и документы конкретного агента:
 
 ```bash
-python scripts/ingest_knowledge.py --agent pmo --include-common
-python scripts/ingest_knowledge.py --agent copywriter
-python scripts/ingest_knowledge.py --agent developer
+python3 scripts/ingest_knowledge.py --agent pmo --include-common
+python3 scripts/ingest_knowledge.py --agent copywriter
+python3 scripts/ingest_knowledge.py --agent developer
 ```
 
 ## Состав знаний по агентам

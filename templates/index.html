@@ -113,6 +113,96 @@
         .agent-btn .name { font-weight: 500; }
         .agent-btn .desc { font-size: 11px; color: #666; }
 
+        .history-panel {
+            width: 260px;
+            background: #121225;
+            border-right: 1px solid #2a2a4a;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .history-head {
+            padding: 16px;
+            border-bottom: 1px solid #2a2a4a;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .history-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #666;
+            letter-spacing: 1px;
+        }
+        .new-chat-btn {
+            background: linear-gradient(135deg, #6d28d9, #7c3aed);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .history-item {
+            width: 100%;
+            text-align: left;
+            border: 1px solid #272744;
+            background: #17172c;
+            color: #d4d4e8;
+            border-radius: 12px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .history-item:hover {
+            border-color: #6d28d9;
+            background: #1d1d35;
+        }
+        .history-item.active {
+            border-color: #8b5cf6;
+            background: #24173f;
+            box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.25) inset;
+        }
+        .history-item-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #f2f2ff;
+            margin-bottom: 6px;
+        }
+        .history-item-preview {
+            font-size: 12px;
+            color: #8f90b7;
+            line-height: 1.4;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .history-item-meta {
+            font-size: 10px;
+            color: #696a8d;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .history-empty {
+            color: #666;
+            font-size: 13px;
+            padding: 18px 10px;
+            text-align: center;
+        }
+
         /* ── Chat area ──────────────────────────────────────────── */
         .chat-area {
             flex: 1;
@@ -352,6 +442,18 @@
             .agent-btn .desc {
                 display: none;
             }
+            .history-panel {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid #2a2a4a;
+                max-height: 220px;
+            }
+            .history-head {
+                padding: 12px;
+            }
+            .history-list {
+                padding: 8px 12px 12px;
+            }
 
             .chat-header {
                 padding: 10px 12px;
@@ -502,6 +604,32 @@
         {% endfor %}
     </div>
 
+    <aside class="history-panel">
+        <div class="history-head">
+            <div class="history-title">История чатов</div>
+            <button class="new-chat-btn" type="button" onclick="createConversation()">Новый чат</button>
+        </div>
+        <div class="history-list" id="history-list">
+            {% if conversations %}
+                {% for conversation in conversations %}
+                <button class="history-item"
+                        type="button"
+                        data-conversation-id="{{ conversation.id }}"
+                        onclick="openConversation('{{ conversation.id }}')">
+                    <div class="history-item-title">{{ conversation.title }}</div>
+                    <div class="history-item-preview">{{ conversation.preview or 'Пока без сообщений' }}</div>
+                    <div class="history-item-meta">
+                        <span>{{ conversation.agent_id }}</span>
+                        <span>{{ conversation.message_count }} msg</span>
+                    </div>
+                </button>
+                {% endfor %}
+            {% else %}
+                <div class="history-empty" id="history-empty">Здесь появятся ваши диалоги.</div>
+            {% endif %}
+        </div>
+    </aside>
+
     <!-- Chat -->
     <div class="chat-area">
         <div class="chat-header">
@@ -541,18 +669,19 @@
 
 <script>
     let currentAgent = 'pmo';
-    let currentAgentName = 'PMO';
+    let currentConversationId = null;
     let currentIcon = '📋';
     let isLoading = false;
+    let conversations = {{ conversations|tojson }};
 
     const agentModels = {
-        pmo: 'OpenAI GPT-4o mini',
-        data_analyst: 'OpenAI GPT-4o mini',
-        developer: 'OpenAI GPT-4o mini → GPT-4o',
-        copywriter: 'OpenAI GPT-4o mini',
-        support: 'OpenAI GPT-4o mini → GPT-4o',
-        strategist: 'OpenAI GPT-4o mini',
-        accountant: 'OpenAI GPT-4o mini → GPT-4o',
+        pmo: 'OpenAI GPT-5.4',
+        data_analyst: 'OpenAI GPT-5.5',
+        developer: 'OpenAI GPT-5.5',
+        copywriter: 'OpenAI GPT-5.4',
+        support: 'OpenAI GPT-5.4 → GPT-5.5',
+        strategist: 'OpenAI GPT-5.5',
+        accountant: 'OpenAI GPT-5.5',
     };
 
     const agentNames = {
@@ -577,11 +706,11 @@
 
     function selectAgent(id, name, icon) {
         currentAgent = id;
-        currentAgentName = name;
         currentIcon = icon;
 
-        document.querySelectorAll('.agent-btn').forEach(b => b.classList.remove('active'));
-        document.querySelector(`[data-agent="${id}"]`).classList.add('active');
+        document.querySelectorAll('.agent-btn').forEach((button) => button.classList.remove('active'));
+        const activeButton = document.querySelector(`[data-agent="${id}"]`);
+        if (activeButton) activeButton.classList.add('active');
 
         document.getElementById('current-agent-name').textContent = name;
         document.getElementById('current-icon').textContent = icon;
@@ -593,38 +722,215 @@
         sendMessage();
     }
 
-    function handleKey(e) {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    function handleKey(event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
     }
 
-    function autoResize(el) {
-        el.style.height = 'auto';
-        el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    function autoResize(element) {
+        element.style.height = 'auto';
+        element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
+    }
+
+    function escapeHtml(text) {
+        const node = document.createElement('div');
+        node.textContent = text || '';
+        return node.innerHTML;
     }
 
     function addMessage(role, text, meta = '', avatarOverride = '') {
         const welcome = document.getElementById('welcome');
         if (welcome) welcome.remove();
 
-        const div = document.createElement('div');
-        div.className = `msg ${role}`;
+        const wrapper = document.createElement('div');
+        wrapper.className = `msg ${role}`;
         const avatar = avatarOverride || (role === 'user' ? '👤' : currentIcon);
-        div.innerHTML = `
+        wrapper.innerHTML = `
             <div class="avatar">${avatar}</div>
             <div>
                 <div class="bubble">${escapeHtml(text)}</div>
-                ${meta ? `<div class="meta">${meta}</div>` : ''}
+                ${meta ? `<div class="meta">${escapeHtml(meta)}</div>` : ''}
             </div>
         `;
-        const msgs = document.getElementById('messages');
-        msgs.appendChild(div);
-        msgs.scrollTop = msgs.scrollHeight;
+
+        const list = document.getElementById('messages');
+        list.appendChild(wrapper);
+        list.scrollTop = list.scrollHeight;
     }
 
-    function escapeHtml(text) {
-        const d = document.createElement('div');
-        d.textContent = text;
-        return d.innerHTML;
+    function clearMessages() {
+        document.getElementById('messages').innerHTML = '';
+    }
+
+    function ensureWelcome() {
+        const list = document.getElementById('messages');
+        if (list.children.length) return;
+        list.innerHTML = `
+            <div class="welcome" id="welcome">
+                <h2>Добро пожаловать в AI Office</h2>
+                <p>Выберите агента слева и отправьте ему задачу. PMO может декомпозировать любую задачу и маршрутизировать к нужному специалисту.</p>
+                <div class="quick-actions">
+                    <button class="quick-btn" onclick="quickSend('Проанализируй данные продаж за Q1 2026')">📊 Анализ данных</button>
+                    <button class="quick-btn" onclick="quickSend('Напиши статью про искусственный интеллект')">✍️ Написать статью</button>
+                    <button class="quick-btn" onclick="quickSend('Сделай ревью кода на Python')">💻 Code Review</button>
+                    <button class="quick-btn" onclick="quickSend('Проанализируй рынок SaaS')">🎯 Анализ рынка</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function formatConversationTime(value) {
+        if (!value) return '';
+        try {
+            return new Date(value).toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        } catch {
+            return '';
+        }
+    }
+
+    function conversationPreview(conversation) {
+        const existingPreview = String(conversation.preview || '').trim();
+        if (existingPreview) return existingPreview;
+        const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+        const last = messages[messages.length - 1];
+        return last ? String(last.text || '').replace(/\s+/g, ' ').trim() : 'Пока без сообщений';
+    }
+
+    function normalizeConversation(conversation) {
+        const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+        return {
+            ...conversation,
+            agent_id: conversation.agent_id || 'pmo',
+            title: conversation.title || 'Новый диалог',
+            messages,
+            message_count: messages.length || conversation.message_count || 0,
+            preview: conversationPreview({ ...conversation, messages }),
+        };
+    }
+
+    function renderHistory() {
+        const container = document.getElementById('history-list');
+        if (!conversations.length) {
+            container.innerHTML = '<div class="history-empty" id="history-empty">Здесь появятся ваши диалоги.</div>';
+            return;
+        }
+
+        container.innerHTML = conversations.map((conversation) => {
+            const activeClass = conversation.id === currentConversationId ? 'active' : '';
+            const title = escapeHtml(conversation.title);
+            const preview = escapeHtml(conversation.preview || 'Пока без сообщений');
+            const agent = escapeHtml(agentNames[conversation.agent_id] || conversation.agent_id || 'PMO');
+            const timestamp = escapeHtml(formatConversationTime(conversation.updated_at || conversation.created_at));
+            return `
+                <button class="history-item ${activeClass}" type="button" onclick="openConversation('${conversation.id}')">
+                    <div class="history-item-title">${title}</div>
+                    <div class="history-item-preview">${preview}</div>
+                    <div class="history-item-meta">
+                        <span>${agent}</span>
+                        <span>${timestamp || `${conversation.message_count} msg`}</span>
+                    </div>
+                </button>
+            `;
+        }).join('');
+    }
+
+    function renderConversationMessages(conversation) {
+        clearMessages();
+        if (!conversation.messages.length) {
+            ensureWelcome();
+            return;
+        }
+
+        for (const message of conversation.messages) {
+            const role = message.role === 'user' ? 'user' : 'agent';
+            const handledBy = message.handled_by || message.agent_id || conversation.agent_id || currentAgent;
+            const avatar = role === 'user' ? '👤' : (agentIcons[handledBy] || '🤖');
+            const meta = role === 'user'
+                ? formatConversationTime(message.created_at)
+                : [
+                    agentNames[handledBy] || handledBy,
+                    message.task_id || '',
+                    formatConversationTime(message.created_at),
+                ].filter(Boolean).join(' · ');
+            addMessage(role, message.text || '', meta, avatar);
+        }
+    }
+
+    function upsertConversation(conversation) {
+        const normalized = normalizeConversation(conversation);
+        const index = conversations.findIndex((item) => item.id === normalized.id);
+        if (index >= 0) {
+            conversations[index] = normalized;
+        } else {
+            conversations.unshift(normalized);
+        }
+        conversations.sort((left, right) => String(right.updated_at || '').localeCompare(String(left.updated_at || '')));
+        renderHistory();
+    }
+
+    async function readJsonResponse(response) {
+        const text = await response.text();
+        if (!text.trim()) return {};
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            const compact = text.replace(/\s+/g, ' ').trim();
+            const preview = compact.slice(0, 220);
+            const authHint = response.status === 401
+                ? 'Vercel Preview требует авторизацию. Открой сайт после входа в Vercel или отключи Deployment Protection для preview.'
+                : preview;
+            throw new Error(`HTTP ${response.status}: сервер вернул не JSON. ${authHint}`);
+        }
+    }
+
+    function apiErrorMessage(response, data) {
+        return data.error || data.detail || `HTTP ${response.status}: агент не смог завершить задачу`;
+    }
+
+    async function openConversation(conversationId) {
+        const response = await fetch(`/api/conversations/${conversationId}`, { credentials: 'include' });
+        const data = await readJsonResponse(response);
+        if (!response.ok || data.status !== 'ok') {
+            addMessage('agent', `❌ Ошибка: ${apiErrorMessage(response, data)}`);
+            return;
+        }
+
+        const conversation = normalizeConversation(data.conversation);
+        currentConversationId = conversation.id;
+        upsertConversation(conversation);
+        selectAgent(
+            conversation.agent_id,
+            agentNames[conversation.agent_id] || 'PMO',
+            agentIcons[conversation.agent_id] || '📋'
+        );
+        renderConversationMessages(conversation);
+    }
+
+    async function createConversation() {
+        const response = await fetch('/api/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ agent_id: currentAgent }),
+        });
+        const data = await readJsonResponse(response);
+        if (!response.ok || data.status !== 'ok') {
+            addMessage('agent', `❌ Ошибка: ${apiErrorMessage(response, data)}`);
+            return;
+        }
+
+        const conversation = normalizeConversation(data.conversation);
+        currentConversationId = conversation.id;
+        upsertConversation(conversation);
+        clearMessages();
+        ensureWelcome();
     }
 
     async function sendMessage() {
@@ -637,18 +943,24 @@
         input.style.height = 'auto';
         document.getElementById('send-btn').disabled = true;
 
-        addMessage('user', text);
+        addMessage('user', text, formatConversationTime(new Date().toISOString()));
         document.getElementById('typing').classList.add('visible');
 
         try {
-            const resp = await fetch('/api/chat', {
+            const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ agent_id: currentAgent, message: text }),
+                credentials: 'include',
+                body: JSON.stringify({
+                    agent_id: currentAgent,
+                    message: text,
+                    conversation_id: currentConversationId,
+                }),
             });
-            const data = await resp.json();
+            const data = await readJsonResponse(response);
 
-            if (data.status === 'ok') {
+            if (response.ok && data.status === 'ok') {
+                currentConversationId = data.conversation_id;
                 const handledBy = data.handled_by || currentAgent;
                 const routed = currentAgent === 'pmo' && handledBy !== 'pmo'
                     ? `PMO → ${agentNames[handledBy] || handledBy}`
@@ -656,12 +968,16 @@
                 const task = data.task_id ? `task: ${data.task_id}` : '';
                 const telegram = data.telegram_notified ? 'Telegram ✓' : 'Telegram не отправлен';
                 const meta = [routed, task, telegram].filter(Boolean).join(' · ');
-                addMessage('agent', data.result, meta, agentIcons[handledBy] || '');
+                addMessage('agent', data.result, meta, agentIcons[handledBy] || '🤖');
+
+                if (data.conversation) {
+                    upsertConversation(data.conversation);
+                }
             } else {
-                addMessage('agent', `❌ Ошибка: ${data.error}`, '');
+                addMessage('agent', `❌ Ошибка: ${apiErrorMessage(response, data)}`);
             }
-        } catch (err) {
-            addMessage('agent', `❌ Ошибка соединения: ${err.message}`, '');
+        } catch (error) {
+            addMessage('agent', `❌ Ошибка соединения: ${error.message}`);
         }
 
         document.getElementById('typing').classList.remove('visible');
@@ -669,6 +985,16 @@
         isLoading = false;
         input.focus();
     }
+
+    window.addEventListener('load', async () => {
+        conversations = conversations.map(normalizeConversation);
+        renderHistory();
+        if (conversations.length) {
+            await openConversation(conversations[0].id);
+        } else {
+            await createConversation();
+        }
+    });
 </script>
 
 </body>
