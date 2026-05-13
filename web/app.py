@@ -1,10 +1,13 @@
 """FastAPI веб-интерфейс для AI Office."""
 
+from __future__ import annotations
+
+import asyncio
 import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -19,9 +22,10 @@ from agents import (
     SupportAgent,
 )
 from core.chat_history import ChatHistoryStore, ChatMessage, utc_now_iso
+from core.config import get_settings
 from core.llm_router import MissingLLMCredentialsError
 from core.logger import get_logger, setup_logging
-from tools.external.telegram import send_telegram_message
+from tools.external.telegram import send_telegram_message, send_telegram_message_to
 
 load_dotenv()
 setup_logging("INFO")
@@ -48,6 +52,37 @@ AGENT_NAMES = {
     "support": "Поддержка",
     "strategist": "Стратег",
     "accountant": "Бухгалтер",
+}
+
+SPECIALIST_AGENT_IDS = [
+    "data_analyst",
+    "developer",
+    "copywriter",
+    "support",
+    "strategist",
+    "accountant",
+]
+
+TELEGRAM_AGENT_ALIASES = {
+    "pmo": "pmo",
+    "пмо": "pmo",
+    "аналитик": "data_analyst",
+    "analytics": "data_analyst",
+    "analyst": "data_analyst",
+    "data": "data_analyst",
+    "data_analyst": "data_analyst",
+    "developer": "developer",
+    "dev": "developer",
+    "разработчик": "developer",
+    "копирайтер": "copywriter",
+    "copywriter": "copywriter",
+    "writer": "copywriter",
+    "support": "support",
+    "поддержка": "support",
+    "стратег": "strategist",
+    "strategist": "strategist",
+    "бухгалтер": "accountant",
+    "accountant": "accountant",
 }
 
 
@@ -212,6 +247,263 @@ def _serialize_conversation(conversation: dict[str, object]) -> dict[str, object
     }
 
 
+def _telegram_conversation_id(chat_id: str | int) -> str:
+    """Build a stable JSON filename-safe conversation id for a Telegram chat."""
+    raw = str(chat_id).strip().replace("-", "m")
+    return f"telegram_{raw}"
+
+
+def _extract_telegram_message(update: dict[str, object]) -> dict[str, object] | None:
+    """Return the user-facing message payload from a Telegram update."""
+    for key in ("message", "channel_post", "edited_message", "edited_channel_post"):
+        value = update.get(key)
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _normalize_telegram_command(text: str) -> tuple[str | None, str]:
+    """Parse Telegram slash commands while ignoring an optional bot username."""
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None, stripped
+
+    command, _, rest = stripped.partition(" ")
+    command = command[1:].split("@", 1)[0].lower()
+    return command, rest.strip()
+
+
+def _parse_telegram_agent_command(command: str | None, body: str) -> tuple[str, str, bool]:
+    """Return agent id, task text, and whether all specialists should run."""
+    if command in {"start", "help"}:
+        return "help", body, False
+    if command == "agents":
+        return "agents", body, False
+    if command in {"all", "все"}:
+        return "pmo", body, True
+    if command == "agent":
+        alias, _, task = body.partition(" ")
+        return TELEGRAM_AGENT_ALIASES.get(alias.lower(), "pmo"), task.strip(), False
+    if command:
+        return TELEGRAM_AGENT_ALIASES.get(command, "pmo"), body, False
+    return "pmo", body, False
+
+
+def _telegram_help_text() -> str:
+    """Return a compact command guide for Telegram users."""
+    return (
+        "AI Office в Telegram готов к работе.\n\n"
+        "Команды:\n"
+        "/pmo задача - PMO выберет нужного агента\n"
+        "/agent developer задача - прямой вызов агента\n"
+        "/all задача - параллельный запуск всех специалистов\n"
+        "/agents - список агентов\n\n"
+        "Без команды сообщение пойдет через PMO."
+    )
+
+
+def _telegram_agents_text() -> str:
+    """Return supported Telegram agent names."""
+    return (
+        "Агенты:\n"
+        "PMO: /pmo\n"
+        "Аналитик: /agent data_analyst\n"
+        "Разработчик: /agent developer\n"
+        "Копирайтер: /agent copywriter\n"
+        "Поддержка: /agent support\n"
+        "Стратег: /agent strategist\n"
+        "Бухгалтер: /agent accountant"
+    )
+
+
+async def _run_telegram_single_agent(
+    *,
+    chat_id: str | int,
+    message_id: int | None,
+    agent_id: str,
+    task: str,
+    conversation_id: str,
+) -> None:
+    """Run one agent and send its answer back to Telegram."""
+    history_for_prompt = chat_store.recent_context(conversation_id, limit=12)
+    chat_store.append_message(
+        conversation_id,
+        ChatMessage(
+            role="user",
+            text=task,
+            created_at=utc_now_iso(),
+            agent_id=agent_id,
+        ),
+    )
+
+    try:
+        if agent_id == "pmo":
+            result_payload = await run_pmo_dispatch(
+                task,
+                conversation_history=history_for_prompt,
+            )
+            handled_by = str(result_payload.get("handled_by", "pmo"))
+        else:
+            result = await run_agent_text_task(
+                agent_id,
+                task,
+                conversation_history=history_for_prompt,
+            )
+            handled_by = agent_id
+            result_payload = {
+                "handled_by": handled_by,
+                "handled_by_name": AGENT_NAMES.get(handled_by, handled_by),
+                "result": result["result"],
+                "task_id": result["task_id"],
+            }
+
+        response_text = str(result_payload.get("result", "")).strip()
+        task_id = str(result_payload.get("task_id", ""))
+        agent_name = AGENT_NAMES.get(handled_by, handled_by)
+        await send_telegram_message_to(
+            chat_id,
+            f"{agent_name} завершил задачу\nTask: {task_id}\n\n{response_text}",
+            reply_to_message_id=message_id,
+        )
+        chat_store.append_message(
+            conversation_id,
+            ChatMessage(
+                role="assistant",
+                text=response_text,
+                created_at=utc_now_iso(),
+                agent_id=agent_id,
+                handled_by=handled_by,
+                task_id=task_id or None,
+            ),
+        )
+    except MissingLLMCredentialsError as error:
+        await send_telegram_message_to(chat_id, format_error(error), reply_to_message_id=message_id)
+    except Exception as error:
+        logger.error("telegram.agent_task.error", agent_id=agent_id, error=str(error), exc_info=True)
+        await send_telegram_message_to(
+            chat_id,
+            f"Агент не смог завершить задачу: {format_error(error)}",
+            reply_to_message_id=message_id,
+        )
+
+
+async def _run_telegram_all_agents(
+    *,
+    chat_id: str | int,
+    message_id: int | None,
+    task: str,
+    conversation_id: str,
+) -> None:
+    """Run all specialist agents concurrently and send a compact digest."""
+    history_for_prompt = chat_store.recent_context(conversation_id, limit=12)
+    chat_store.append_message(
+        conversation_id,
+        ChatMessage(role="user", text=task, created_at=utc_now_iso(), agent_id="all"),
+    )
+
+    async def run_one(agent_id: str) -> tuple[str, str, str]:
+        try:
+            result = await run_agent_text_task(
+                agent_id,
+                task,
+                conversation_history=history_for_prompt,
+            )
+            return agent_id, result["task_id"], result["result"]
+        except Exception as error:
+            logger.error("telegram.parallel_agent.error", agent_id=agent_id, error=str(error), exc_info=True)
+            return agent_id, "", f"Ошибка: {format_error(error)}"
+
+    results = await asyncio.gather(*(run_one(agent_id) for agent_id in SPECIALIST_AGENT_IDS))
+    digest_parts: list[str] = []
+    for agent_id, task_id, result_text in results:
+        agent_name = AGENT_NAMES.get(agent_id, agent_id)
+        digest_parts.append(f"{agent_name} ({task_id or 'error'}):\n{str(result_text).strip()[:900]}")
+
+    digest = "\n\n".join(digest_parts)
+    await send_telegram_message_to(
+        chat_id,
+        f"Параллельная работа агентов завершена\n\n{digest}",
+        reply_to_message_id=message_id,
+    )
+    chat_store.append_message(
+        conversation_id,
+        ChatMessage(
+            role="assistant",
+            text=digest,
+            created_at=utc_now_iso(),
+            agent_id="all",
+            handled_by="all",
+        ),
+    )
+
+
+async def process_telegram_update(update: dict[str, object]) -> None:
+    """Handle an incoming Telegram webhook update."""
+    message = _extract_telegram_message(update)
+    if not message:
+        return
+
+    chat = message.get("chat")
+    if not isinstance(chat, dict):
+        return
+
+    text = str(message.get("text") or message.get("caption") or "").strip()
+    if not text:
+        return
+
+    chat_id = chat.get("id")
+    message_id = message.get("message_id")
+    if chat_id is None:
+        return
+
+    command, body = _normalize_telegram_command(text)
+    agent_id, task, run_all = _parse_telegram_agent_command(command, body)
+    if agent_id == "help":
+        await send_telegram_message_to(chat_id, _telegram_help_text(), reply_to_message_id=message_id)
+        return
+    if agent_id == "agents":
+        await send_telegram_message_to(chat_id, _telegram_agents_text(), reply_to_message_id=message_id)
+        return
+    if not task:
+        await send_telegram_message_to(
+            chat_id,
+            "Напишите задачу после команды. Например: /pmo подготовь план запуска",
+            reply_to_message_id=message_id,
+        )
+        return
+
+    conversation_id = _telegram_conversation_id(chat_id)
+    if not chat_store.get_conversation(conversation_id):
+        chat_store.create_conversation(
+            agent_id=agent_id,
+            title=f"Telegram {chat_id}",
+            conversation_id=conversation_id,
+        )
+    chat_store.touch_conversation(conversation_id, agent_id=agent_id)
+
+    await send_telegram_message_to(
+        chat_id,
+        "Принял задачу. Запускаю агентов.",
+        reply_to_message_id=message_id,
+    )
+    if run_all:
+        await _run_telegram_all_agents(
+            chat_id=chat_id,
+            message_id=message_id if isinstance(message_id, int) else None,
+            task=task,
+            conversation_id=conversation_id,
+        )
+        return
+
+    await _run_telegram_single_agent(
+        chat_id=chat_id,
+        message_id=message_id if isinstance(message_id, int) else None,
+        agent_id=agent_id,
+        task=task,
+        conversation_id=conversation_id,
+    )
+
+
 @app.get("/health")
 async def health():
     """Health check для хостинга и load balancer."""
@@ -270,6 +562,21 @@ async def telegram_notify(request: Request):
         "telegram_notified": telegram_sent,
         "status": "ok" if telegram_sent else "error",
     })
+
+
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Receive Telegram Bot API updates and run AI Office agents."""
+    settings = get_settings()
+    expected_secret = settings.telegram_webhook_secret.strip()
+    if expected_secret:
+        actual_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if actual_secret != expected_secret:
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    update = await request.json()
+    background_tasks.add_task(process_telegram_update, update)
+    return JSONResponse({"status": "accepted"})
 
 
 # ── API: отправка сообщения агенту ───────────────────────────────────

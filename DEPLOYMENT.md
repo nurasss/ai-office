@@ -24,6 +24,7 @@ OPENAI_DEFAULT_MODEL=gpt-4o-mini
 OPENAI_HEAVY_MODEL=gpt-4o
 TELEGRAM_BOT_TOKEN=123456789:...
 TELEGRAM_CHAT_ID=123456789
+TELEGRAM_WEBHOOK_SECRET=long-random-string
 ```
 
 7. Запустить деплой.
@@ -68,6 +69,29 @@ LOG_LEVEL=INFO
 ```
 
 `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` нужны для уведомления после завершения PMO-задачи. Если они не заданы, чат продолжит работать, но уведомление будет пропущено.
+
+## Telegram chat / channel webhook
+
+Чтобы Telegram стал рабочим чатом для агентов, добавьте бота в группу или канал
+и назначьте webhook на production-домен:
+
+```bash
+curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+```
+
+Поддерживаемые команды:
+
+```text
+/pmo задача
+/agent developer задача
+/agent data_analyst задача
+/all задача
+/agents
+```
+
+Без команды сообщение обрабатывается через PMO.
 
 Команда запуска внутри контейнера уже задана:
 

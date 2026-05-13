@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     slack_bot_token: str = Field(default="", validation_alias="SLACK_BOT_TOKEN")
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", validation_alias="TELEGRAM_CHAT_ID")
+    telegram_webhook_secret: str = Field(
+        default="", validation_alias="TELEGRAM_WEBHOOK_SECRET"
+    )
     github_token: str = Field(default="", validation_alias="GITHUB_TOKEN")
     jira_url: str = Field(default="", validation_alias="JIRA_URL")
     jira_user: str = Field(default="", validation_alias="JIRA_USER")

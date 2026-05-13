@@ -107,9 +107,10 @@ class ChatHistoryStore:
         *,
         agent_id: str = "pmo",
         title: str = "Новый диалог",
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Create and persist an empty conversation."""
-        conversation_id = uuid.uuid4().hex
+        conversation_id = conversation_id or uuid.uuid4().hex
         now = utc_now_iso()
         conversation = {
             "id": conversation_id,
