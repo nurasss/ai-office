@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi.testclient import TestClient
 
 import web.app as web_app
@@ -6,6 +8,14 @@ from core.chat_history import ChatHistoryStore
 
 class FakeSettings:
     telegram_webhook_secret = ""
+    telegram_general_thread_id = ""
+    telegram_pmo_thread_id = ""
+    telegram_data_analyst_thread_id = ""
+    telegram_developer_thread_id = ""
+    telegram_copywriter_thread_id = ""
+    telegram_support_thread_id = ""
+    telegram_strategist_thread_id = ""
+    telegram_accountant_thread_id = ""
 
 
 class FakeAgent:
@@ -13,14 +23,30 @@ class FakeAgent:
         return f"done:{message}"
 
 
-def telegram_update(text: str, chat_id: int = 123, message_id: int = 7):
+class FakePMOAgent:
+    def __init__(self, active_agent: str = "developer"):
+        self.active_agent = active_agent
+
+    async def process(self, payload):
+        return {"active_agent": self.active_agent, "subtasks": []}
+
+
+def telegram_update(
+    text: str,
+    chat_id: int = 123,
+    message_id: int = 7,
+    message_thread_id: int | None = None,
+):
+    message = {
+        "message_id": message_id,
+        "chat": {"id": chat_id, "type": "group"},
+        "text": text,
+    }
+    if message_thread_id is not None:
+        message["message_thread_id"] = message_thread_id
     return {
         "update_id": 1,
-        "message": {
-            "message_id": message_id,
-            "chat": {"id": chat_id, "type": "group"},
-            "text": text,
-        },
+        "message": message,
     }
 
 
@@ -67,6 +93,64 @@ def test_agent_webhook_uses_agent_as_default(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json()["agent_id"] == "developer"
     assert any("done:проверь код" in text for _, text in sent_messages)
+
+
+def test_pmo_routes_general_message_to_agent_topic(tmp_path, monkeypatch):
+    class TopicSettings(FakeSettings):
+        telegram_developer_thread_id = "42"
+
+    sent_messages: list[dict[str, object]] = []
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append({"chat_id": str(chat_id), "text": text, **kwargs})
+        return True
+
+    monkeypatch.setattr(web_app, "chat_store", ChatHistoryStore(tmp_path))
+    monkeypatch.setattr(
+        web_app,
+        "_agents",
+        {"pmo": FakePMOAgent("developer"), "developer": FakeAgent()},
+    )
+    monkeypatch.setattr(web_app, "get_settings", lambda: TopicSettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+
+    client = TestClient(web_app.app)
+    response = client.post("/api/telegram/webhook", json=telegram_update("проверь код"))
+
+    assert response.status_code == 200
+    assert any(
+        "PMO направил задачу" in str(message["text"])
+        and message.get("message_thread_id") == 42
+        for message in sent_messages
+    )
+    assert any(
+        "done:проверь код" in str(message["text"])
+        and message.get("message_thread_id") == 42
+        for message in sent_messages
+    )
+
+
+def test_bind_command_saves_current_topic(tmp_path, monkeypatch):
+    sent_messages: list[dict[str, object]] = []
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append({"chat_id": str(chat_id), "text": text, **kwargs})
+        return True
+
+    store = ChatHistoryStore(tmp_path)
+    monkeypatch.setattr(web_app, "chat_store", store)
+    monkeypatch.setattr(web_app, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+
+    client = TestClient(web_app.app)
+    response = client.post(
+        "/api/telegram/webhook",
+        json=telegram_update("/bind developer", message_thread_id=55),
+    )
+
+    assert response.status_code == 200
+    assert web_app._load_telegram_topic_bindings(123)["developer"] == 55
+    assert any("Привязал тему" in str(message["text"]) for message in sent_messages)
 
 
 def test_telegram_webhook_rejects_wrong_secret(monkeypatch):

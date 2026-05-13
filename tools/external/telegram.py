@@ -41,6 +41,7 @@ def _send_telegram_message_sync(
     text: str,
     *,
     reply_to_message_id: int | None = None,
+    message_thread_id: int | None = None,
 ) -> bool:
     """Send a Telegram message with the standard Bot API."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -51,6 +52,8 @@ def _send_telegram_message_sync(
     }
     if reply_to_message_id is not None:
         payload_data["reply_to_message_id"] = str(reply_to_message_id)
+    if message_thread_id is not None:
+        payload_data["message_thread_id"] = str(message_thread_id)
 
     payload = urllib.parse.urlencode(payload_data).encode("utf-8")
     request = urllib.request.Request(url, data=payload, method="POST")
@@ -85,6 +88,7 @@ async def send_telegram_message_to(
     *,
     agent_id: str | None = None,
     reply_to_message_id: int | None = None,
+    message_thread_id: int | None = None,
 ) -> bool:
     """Send a Telegram message to the chat that triggered a webhook."""
     token = get_telegram_bot_token(agent_id)
@@ -100,6 +104,7 @@ async def send_telegram_message_to(
             str(chat_id),
             text,
             reply_to_message_id=reply_to_message_id,
+            message_thread_id=message_thread_id,
         )
         logger.info("telegram.sent_to_chat", sent=sent, chat_id=str(chat_id))
         return sent

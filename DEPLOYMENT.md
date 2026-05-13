@@ -32,6 +32,14 @@ TELEGRAM_STRATEGIST_BOT_TOKEN=123456789:...
 TELEGRAM_ACCOUNTANT_BOT_TOKEN=123456789:...
 TELEGRAM_CHAT_ID=123456789
 TELEGRAM_WEBHOOK_SECRET=long-random-string
+TELEGRAM_GENERAL_THREAD_ID=
+TELEGRAM_PMO_THREAD_ID=
+TELEGRAM_DATA_ANALYST_THREAD_ID=
+TELEGRAM_DEVELOPER_THREAD_ID=
+TELEGRAM_COPYWRITER_THREAD_ID=
+TELEGRAM_SUPPORT_THREAD_ID=
+TELEGRAM_STRATEGIST_THREAD_ID=
+TELEGRAM_ACCOUNTANT_THREAD_ID=
 ```
 
 7. Запустить деплой.
@@ -133,6 +141,30 @@ curl "https://api.telegram.org/bot<TELEGRAM_ACCOUNTANT_BOT_TOKEN>/setWebhook" \
 ```
 
 Без команды сообщение обрабатывается через PMO.
+
+### Telegram Topics
+
+Для группы с темами можно сделать `General` входящей темой: сообщение без команды
+попадает к PMO, PMO выбирает исполнителя, затем задача и результат публикуются в
+тему нужного агента.
+
+Надежный production-вариант: сохранить `message_thread_id` тем в Vercel env
+через переменные `TELEGRAM_*_THREAD_ID`. Быстрый способ узнать и привязать тему:
+отправьте команду внутри каждой Telegram Topic:
+
+```text
+/bind general
+/bind pmo
+/bind data_analyst
+/bind developer
+/bind copywriter
+/bind support
+/bind strategist
+/bind accountant
+```
+
+Для чтения обычных сообщений в группе у PMO-бота должна быть отключена Privacy
+Mode в BotFather или сообщения должны приходить как команды/упоминания.
 
 Команда запуска внутри контейнера уже задана:
 

@@ -85,6 +85,17 @@ TELEGRAM_AGENT_ALIASES = {
     "accountant": "accountant",
 }
 
+TELEGRAM_THREAD_FIELDS = {
+    "general": "telegram_general_thread_id",
+    "pmo": "telegram_pmo_thread_id",
+    "data_analyst": "telegram_data_analyst_thread_id",
+    "developer": "telegram_developer_thread_id",
+    "copywriter": "telegram_copywriter_thread_id",
+    "support": "telegram_support_thread_id",
+    "strategist": "telegram_strategist_thread_id",
+    "accountant": "telegram_accountant_thread_id",
+}
+
 
 def get_agent(agent_id: str):
     """Ленивая инициализация агентов."""
@@ -253,6 +264,12 @@ def _telegram_conversation_id(chat_id: str | int) -> str:
     return f"telegram_{raw}"
 
 
+def _telegram_topic_bindings_id(chat_id: str | int) -> str:
+    """Build a stable storage id for Telegram topic bindings."""
+    raw = str(chat_id).strip().replace("-", "m")
+    return f"telegram_topics_{raw}"
+
+
 def _extract_telegram_message(update: dict[str, object]) -> dict[str, object] | None:
     """Return the user-facing message payload from a Telegram update."""
     for key in ("message", "channel_post", "edited_message", "edited_channel_post"):
@@ -271,6 +288,90 @@ def _normalize_telegram_command(text: str) -> tuple[str | None, str]:
     command, _, rest = stripped.partition(" ")
     command = command[1:].split("@", 1)[0].lower()
     return command, rest.strip()
+
+
+def _telegram_message_thread_id(message: dict[str, object]) -> int | None:
+    """Extract a forum topic id from a Telegram message when present."""
+    thread_id = message.get("message_thread_id")
+    if isinstance(thread_id, int):
+        return thread_id
+    try:
+        return int(str(thread_id)) if thread_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _configured_telegram_thread_id(topic_name: str) -> int | None:
+    """Return a thread id configured through env vars."""
+    field_name = TELEGRAM_THREAD_FIELDS.get(topic_name)
+    if not field_name:
+        return None
+    raw_value = str(getattr(get_settings(), field_name, "")).strip()
+    if not raw_value:
+        return None
+    try:
+        return int(raw_value)
+    except ValueError:
+        logger.warning("telegram.thread.invalid", topic=topic_name, value=raw_value)
+        return None
+
+
+def _load_telegram_topic_bindings(chat_id: str | int) -> dict[str, int]:
+    """Load topic bindings saved with /bind commands."""
+    conversation = chat_store.get_conversation(_telegram_topic_bindings_id(chat_id))
+    if not conversation:
+        return {}
+    bindings = conversation.get("topic_bindings", {})
+    if not isinstance(bindings, dict):
+        return {}
+
+    parsed: dict[str, int] = {}
+    for name, value in bindings.items():
+        try:
+            parsed[str(name)] = int(value)
+        except (TypeError, ValueError):
+            continue
+    return parsed
+
+
+def _save_telegram_topic_binding(chat_id: str | int, topic_name: str, thread_id: int) -> None:
+    """Persist one Telegram topic binding for the current deployment filesystem."""
+    conversation_id = _telegram_topic_bindings_id(chat_id)
+    conversation = chat_store.get_conversation(conversation_id)
+    if not conversation:
+        conversation = chat_store.create_conversation(
+            agent_id="pmo",
+            title=f"Telegram topics {chat_id}",
+            conversation_id=conversation_id,
+        )
+    bindings = conversation.setdefault("topic_bindings", {})
+    if not isinstance(bindings, dict):
+        bindings = {}
+        conversation["topic_bindings"] = bindings
+    bindings[topic_name] = thread_id
+    conversation["updated_at"] = utc_now_iso()
+    chat_store._write_file(conversation_id, conversation)
+
+
+def _resolve_telegram_thread_id(
+    chat_id: str | int,
+    topic_name: str,
+    *,
+    fallback_thread_id: int | None = None,
+) -> int | None:
+    """Resolve a Telegram topic id from env, /bind storage, or current message."""
+    configured_thread_id = _configured_telegram_thread_id(topic_name)
+    if configured_thread_id is not None:
+        return configured_thread_id
+    return _load_telegram_topic_bindings(chat_id).get(topic_name, fallback_thread_id)
+
+
+def _normalize_telegram_topic_name(raw_name: str) -> str | None:
+    """Map Telegram /bind aliases to supported topic names."""
+    key = raw_name.strip().lower()
+    if key in {"general", "общий", "главный"}:
+        return "general"
+    return TELEGRAM_AGENT_ALIASES.get(key)
 
 
 def _parse_telegram_agent_command(
@@ -302,8 +403,10 @@ def _telegram_help_text() -> str:
         "/pmo задача - PMO выберет нужного агента\n"
         "/agent developer задача - прямой вызов агента\n"
         "/all задача - параллельный запуск всех специалистов\n"
+        "/bind developer - привязать текущую тему к агенту\n"
         "/agents - список агентов\n\n"
-        "Без команды сообщение пойдет через PMO."
+        "Без команды сообщение пойдет через PMO. В группе с Topics PMO может "
+        "перенаправлять работу в темы агентов."
     )
 
 
@@ -328,6 +431,7 @@ async def _run_telegram_single_agent(
     agent_id: str,
     task: str,
     conversation_id: str,
+    response_thread_id: int | None = None,
 ) -> None:
     """Run one agent and send its answer back to Telegram."""
     history_for_prompt = chat_store.recent_context(conversation_id, limit=12)
@@ -370,6 +474,7 @@ async def _run_telegram_single_agent(
             f"{agent_name} завершил задачу\nTask: {task_id}\n\n{response_text}",
             agent_id=agent_id,
             reply_to_message_id=message_id,
+            message_thread_id=response_thread_id,
         )
         chat_store.append_message(
             conversation_id,
@@ -388,6 +493,7 @@ async def _run_telegram_single_agent(
             format_error(error),
             agent_id=agent_id,
             reply_to_message_id=message_id,
+            message_thread_id=response_thread_id,
         )
     except Exception as error:
         logger.error("telegram.agent_task.error", agent_id=agent_id, error=str(error), exc_info=True)
@@ -396,6 +502,101 @@ async def _run_telegram_single_agent(
             f"Агент не смог завершить задачу: {format_error(error)}",
             agent_id=agent_id,
             reply_to_message_id=message_id,
+            message_thread_id=response_thread_id,
+        )
+
+
+async def _run_telegram_pmo_routed_task(
+    *,
+    chat_id: str | int,
+    message_id: int | None,
+    task: str,
+    conversation_id: str,
+    source_thread_id: int | None = None,
+) -> None:
+    """Let PMO route a General message, then post work/results in the target topic."""
+    history_for_prompt = chat_store.recent_context(conversation_id, limit=12)
+    chat_store.append_message(
+        conversation_id,
+        ChatMessage(
+            role="user",
+            text=task,
+            created_at=utc_now_iso(),
+            agent_id="pmo",
+        ),
+    )
+
+    try:
+        route_task = _build_chat_prompt(task, history_for_prompt)
+        pmo = get_agent("pmo")
+        route_result = await pmo.process({
+            "current_task": route_task,
+            "messages": history_for_prompt,
+            "subtasks": [],
+        })
+
+        target_agent_id = str(route_result.get("active_agent", "data_analyst"))
+        if target_agent_id == "pmo":
+            target_agent_id = "data_analyst"
+        if target_agent_id not in AGENT_NAMES:
+            target_agent_id = "data_analyst"
+
+        target_thread_id = _resolve_telegram_thread_id(
+            chat_id,
+            target_agent_id,
+            fallback_thread_id=source_thread_id,
+        )
+        target_agent_name = AGENT_NAMES.get(target_agent_id, target_agent_id)
+
+        await send_telegram_message_to(
+            chat_id,
+            f"PMO направил задачу → {target_agent_name}\n\n{task}",
+            agent_id="pmo",
+            reply_to_message_id=message_id if target_thread_id == source_thread_id else None,
+            message_thread_id=target_thread_id,
+        )
+
+        result = await run_agent_text_task(
+            target_agent_id,
+            task,
+            conversation_history=history_for_prompt,
+        )
+        response_text = result["result"]
+        task_id = result["task_id"]
+
+        await send_telegram_message_to(
+            chat_id,
+            f"{target_agent_name} завершил задачу\nTask: {task_id}\n\n{response_text}",
+            agent_id=target_agent_id,
+            message_thread_id=target_thread_id,
+        )
+        chat_store.append_message(
+            conversation_id,
+            ChatMessage(
+                role="assistant",
+                text=response_text,
+                created_at=utc_now_iso(),
+                agent_id="pmo",
+                handled_by=target_agent_id,
+                task_id=task_id,
+            ),
+        )
+    except MissingLLMCredentialsError as error:
+        await send_telegram_message_to(
+            chat_id,
+            format_error(error),
+            agent_id="pmo",
+            reply_to_message_id=message_id,
+            message_thread_id=source_thread_id,
+        )
+    except Exception as error:
+        logger.error("telegram.pmo_routing.error", error=str(error), exc_info=True)
+        await send_telegram_message_to(
+            chat_id,
+            f"PMO не смог маршрутизировать задачу: {format_error(error)}",
+            agent_id="pmo",
+            reply_to_message_id=message_id,
+            message_thread_id=source_thread_id,
         )
 
 
@@ -405,6 +606,7 @@ async def _run_telegram_all_agents(
     message_id: int | None,
     task: str,
     conversation_id: str,
+    response_thread_id: int | None = None,
 ) -> None:
     """Run all specialist agents concurrently and send a compact digest."""
     history_for_prompt = chat_store.recent_context(conversation_id, limit=12)
@@ -437,6 +639,7 @@ async def _run_telegram_all_agents(
         f"Параллельная работа агентов завершена\n\n{digest}",
         agent_id="pmo",
         reply_to_message_id=message_id,
+        message_thread_id=response_thread_id,
     )
     chat_store.append_message(
         conversation_id,
@@ -470,10 +673,41 @@ async def process_telegram_update(
 
     chat_id = chat.get("id")
     message_id = message.get("message_id")
+    source_thread_id = _telegram_message_thread_id(message)
     if chat_id is None:
         return
 
     command, body = _normalize_telegram_command(text)
+    if command == "bind":
+        topic_name = _normalize_telegram_topic_name(body)
+        if not topic_name:
+            await send_telegram_message_to(
+                chat_id,
+                "Укажите тему: /bind general, /bind developer, /bind data_analyst и т.д.",
+                agent_id=default_agent_id,
+                reply_to_message_id=message_id if isinstance(message_id, int) else None,
+                message_thread_id=source_thread_id,
+            )
+            return
+        if source_thread_id is None:
+            await send_telegram_message_to(
+                chat_id,
+                "Эту команду нужно отправить внутри Telegram Topic, чтобы я увидел message_thread_id.",
+                agent_id=default_agent_id,
+                reply_to_message_id=message_id if isinstance(message_id, int) else None,
+            )
+            return
+
+        _save_telegram_topic_binding(chat_id, topic_name, source_thread_id)
+        await send_telegram_message_to(
+            chat_id,
+            f"Привязал тему `{topic_name}` к thread_id={source_thread_id}.",
+            agent_id=default_agent_id,
+            reply_to_message_id=message_id if isinstance(message_id, int) else None,
+            message_thread_id=source_thread_id,
+        )
+        return
+
     agent_id, task, run_all = _parse_telegram_agent_command(
         command,
         body,
@@ -485,6 +719,7 @@ async def process_telegram_update(
             _telegram_help_text(),
             agent_id=default_agent_id,
             reply_to_message_id=message_id,
+            message_thread_id=source_thread_id,
         )
         return
     if agent_id == "agents":
@@ -493,6 +728,7 @@ async def process_telegram_update(
             _telegram_agents_text(),
             agent_id=default_agent_id,
             reply_to_message_id=message_id,
+            message_thread_id=source_thread_id,
         )
         return
     if not task:
@@ -501,6 +737,7 @@ async def process_telegram_update(
             "Напишите задачу после команды. Например: /pmo подготовь план запуска",
             agent_id=default_agent_id,
             reply_to_message_id=message_id,
+            message_thread_id=source_thread_id,
         )
         return
 
@@ -518,6 +755,7 @@ async def process_telegram_update(
         "Принял задачу. Запускаю агентов.",
         agent_id=agent_id,
         reply_to_message_id=message_id,
+        message_thread_id=source_thread_id,
     )
     if run_all:
         await _run_telegram_all_agents(
@@ -525,6 +763,22 @@ async def process_telegram_update(
             message_id=message_id if isinstance(message_id, int) else None,
             task=task,
             conversation_id=conversation_id,
+            response_thread_id=source_thread_id,
+        )
+        return
+
+    target_thread_id = _resolve_telegram_thread_id(
+        chat_id,
+        agent_id,
+        fallback_thread_id=source_thread_id,
+    )
+    if agent_id == "pmo":
+        await _run_telegram_pmo_routed_task(
+            chat_id=chat_id,
+            message_id=message_id if isinstance(message_id, int) else None,
+            task=task,
+            conversation_id=conversation_id,
+            source_thread_id=source_thread_id,
         )
         return
 
@@ -534,6 +788,7 @@ async def process_telegram_update(
         agent_id=agent_id,
         task=task,
         conversation_id=conversation_id,
+        response_thread_id=target_thread_id,
     )
 
 

@@ -71,6 +71,30 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = Field(
         default="", validation_alias="TELEGRAM_WEBHOOK_SECRET"
     )
+    telegram_general_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_GENERAL_THREAD_ID"
+    )
+    telegram_pmo_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_PMO_THREAD_ID"
+    )
+    telegram_data_analyst_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_DATA_ANALYST_THREAD_ID"
+    )
+    telegram_developer_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_DEVELOPER_THREAD_ID"
+    )
+    telegram_copywriter_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_COPYWRITER_THREAD_ID"
+    )
+    telegram_support_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_SUPPORT_THREAD_ID"
+    )
+    telegram_strategist_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_STRATEGIST_THREAD_ID"
+    )
+    telegram_accountant_thread_id: str = Field(
+        default="", validation_alias="TELEGRAM_ACCOUNTANT_THREAD_ID"
+    )
     github_token: str = Field(default="", validation_alias="GITHUB_TOKEN")
     jira_url: str = Field(default="", validation_alias="JIRA_URL")
     jira_user: str = Field(default="", validation_alias="JIRA_USER")
