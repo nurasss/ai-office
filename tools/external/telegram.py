@@ -12,6 +12,28 @@ from core.logger import get_logger
 
 logger = get_logger("tools.telegram")
 
+AGENT_TOKEN_FIELDS = {
+    "pmo": "telegram_pmo_bot_token",
+    "data_analyst": "telegram_data_analyst_bot_token",
+    "developer": "telegram_developer_bot_token",
+    "copywriter": "telegram_copywriter_bot_token",
+    "support": "telegram_support_bot_token",
+    "strategist": "telegram_strategist_bot_token",
+    "accountant": "telegram_accountant_bot_token",
+}
+
+
+def get_telegram_bot_token(agent_id: str | None = None) -> str:
+    """Return an agent-specific bot token with fallback to the legacy token."""
+    settings = get_settings()
+    if agent_id:
+        field_name = AGENT_TOKEN_FIELDS.get(agent_id)
+        if field_name:
+            token = str(getattr(settings, field_name, "")).strip()
+            if token:
+                return token
+    return settings.telegram_bot_token.strip()
+
 
 def _send_telegram_message_sync(
     token: str,
@@ -41,7 +63,7 @@ def _send_telegram_message_sync(
 async def send_telegram_message(text: str) -> bool:
     """Send a Telegram notification if TELEGRAM_* env vars are configured."""
     settings = get_settings()
-    token = settings.telegram_bot_token.strip()
+    token = get_telegram_bot_token()
     chat_id = settings.telegram_chat_id.strip()
 
     if not token or not chat_id:
@@ -61,11 +83,11 @@ async def send_telegram_message_to(
     chat_id: str | int,
     text: str,
     *,
+    agent_id: str | None = None,
     reply_to_message_id: int | None = None,
 ) -> bool:
     """Send a Telegram message to the chat that triggered a webhook."""
-    settings = get_settings()
-    token = settings.telegram_bot_token.strip()
+    token = get_telegram_bot_token(agent_id)
 
     if not token:
         logger.info("telegram.skipped", reason="token_not_configured")

@@ -273,7 +273,12 @@ def _normalize_telegram_command(text: str) -> tuple[str | None, str]:
     return command, rest.strip()
 
 
-def _parse_telegram_agent_command(command: str | None, body: str) -> tuple[str, str, bool]:
+def _parse_telegram_agent_command(
+    command: str | None,
+    body: str,
+    *,
+    default_agent_id: str = "pmo",
+) -> tuple[str, str, bool]:
     """Return agent id, task text, and whether all specialists should run."""
     if command in {"start", "help"}:
         return "help", body, False
@@ -283,10 +288,10 @@ def _parse_telegram_agent_command(command: str | None, body: str) -> tuple[str, 
         return "pmo", body, True
     if command == "agent":
         alias, _, task = body.partition(" ")
-        return TELEGRAM_AGENT_ALIASES.get(alias.lower(), "pmo"), task.strip(), False
+        return TELEGRAM_AGENT_ALIASES.get(alias.lower(), default_agent_id), task.strip(), False
     if command:
-        return TELEGRAM_AGENT_ALIASES.get(command, "pmo"), body, False
-    return "pmo", body, False
+        return TELEGRAM_AGENT_ALIASES.get(command, default_agent_id), body, False
+    return default_agent_id, body, False
 
 
 def _telegram_help_text() -> str:
@@ -363,6 +368,7 @@ async def _run_telegram_single_agent(
         await send_telegram_message_to(
             chat_id,
             f"{agent_name} завершил задачу\nTask: {task_id}\n\n{response_text}",
+            agent_id=agent_id,
             reply_to_message_id=message_id,
         )
         chat_store.append_message(
@@ -377,12 +383,18 @@ async def _run_telegram_single_agent(
             ),
         )
     except MissingLLMCredentialsError as error:
-        await send_telegram_message_to(chat_id, format_error(error), reply_to_message_id=message_id)
+        await send_telegram_message_to(
+            chat_id,
+            format_error(error),
+            agent_id=agent_id,
+            reply_to_message_id=message_id,
+        )
     except Exception as error:
         logger.error("telegram.agent_task.error", agent_id=agent_id, error=str(error), exc_info=True)
         await send_telegram_message_to(
             chat_id,
             f"Агент не смог завершить задачу: {format_error(error)}",
+            agent_id=agent_id,
             reply_to_message_id=message_id,
         )
 
@@ -423,6 +435,7 @@ async def _run_telegram_all_agents(
     await send_telegram_message_to(
         chat_id,
         f"Параллельная работа агентов завершена\n\n{digest}",
+        agent_id="pmo",
         reply_to_message_id=message_id,
     )
     chat_store.append_message(
@@ -437,7 +450,11 @@ async def _run_telegram_all_agents(
     )
 
 
-async def process_telegram_update(update: dict[str, object]) -> None:
+async def process_telegram_update(
+    update: dict[str, object],
+    *,
+    default_agent_id: str = "pmo",
+) -> None:
     """Handle an incoming Telegram webhook update."""
     message = _extract_telegram_message(update)
     if not message:
@@ -457,17 +474,32 @@ async def process_telegram_update(update: dict[str, object]) -> None:
         return
 
     command, body = _normalize_telegram_command(text)
-    agent_id, task, run_all = _parse_telegram_agent_command(command, body)
+    agent_id, task, run_all = _parse_telegram_agent_command(
+        command,
+        body,
+        default_agent_id=default_agent_id,
+    )
     if agent_id == "help":
-        await send_telegram_message_to(chat_id, _telegram_help_text(), reply_to_message_id=message_id)
+        await send_telegram_message_to(
+            chat_id,
+            _telegram_help_text(),
+            agent_id=default_agent_id,
+            reply_to_message_id=message_id,
+        )
         return
     if agent_id == "agents":
-        await send_telegram_message_to(chat_id, _telegram_agents_text(), reply_to_message_id=message_id)
+        await send_telegram_message_to(
+            chat_id,
+            _telegram_agents_text(),
+            agent_id=default_agent_id,
+            reply_to_message_id=message_id,
+        )
         return
     if not task:
         await send_telegram_message_to(
             chat_id,
             "Напишите задачу после команды. Например: /pmo подготовь план запуска",
+            agent_id=default_agent_id,
             reply_to_message_id=message_id,
         )
         return
@@ -484,6 +516,7 @@ async def process_telegram_update(update: dict[str, object]) -> None:
     await send_telegram_message_to(
         chat_id,
         "Принял задачу. Запускаю агентов.",
+        agent_id=agent_id,
         reply_to_message_id=message_id,
     )
     if run_all:
@@ -577,6 +610,32 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     update = await request.json()
     background_tasks.add_task(process_telegram_update, update)
     return JSONResponse({"status": "accepted"})
+
+
+@app.post("/api/telegram/webhook/{agent_id}")
+async def telegram_agent_webhook(
+    agent_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """Receive Telegram updates for a specific agent bot."""
+    if agent_id not in AGENT_NAMES:
+        return JSONResponse({"error": f"Unknown agent: {agent_id}"}, status_code=404)
+
+    settings = get_settings()
+    expected_secret = settings.telegram_webhook_secret.strip()
+    if expected_secret:
+        actual_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if actual_secret != expected_secret:
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    update = await request.json()
+    background_tasks.add_task(
+        process_telegram_update,
+        update,
+        default_agent_id=agent_id,
+    )
+    return JSONResponse({"status": "accepted", "agent_id": agent_id})
 
 
 # ── API: отправка сообщения агенту ───────────────────────────────────

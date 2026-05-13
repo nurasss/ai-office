@@ -46,6 +46,27 @@ class Settings(BaseSettings):
     # ── External Tools ─────────────────────────────────────────────────
     slack_bot_token: str = Field(default="", validation_alias="SLACK_BOT_TOKEN")
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
+    telegram_pmo_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_PMO_BOT_TOKEN"
+    )
+    telegram_data_analyst_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_DATA_ANALYST_BOT_TOKEN"
+    )
+    telegram_developer_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_DEVELOPER_BOT_TOKEN"
+    )
+    telegram_copywriter_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_COPYWRITER_BOT_TOKEN"
+    )
+    telegram_support_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_SUPPORT_BOT_TOKEN"
+    )
+    telegram_strategist_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_STRATEGIST_BOT_TOKEN"
+    )
+    telegram_accountant_bot_token: str = Field(
+        default="", validation_alias="TELEGRAM_ACCOUNTANT_BOT_TOKEN"
+    )
     telegram_chat_id: str = Field(default="", validation_alias="TELEGRAM_CHAT_ID")
     telegram_webhook_secret: str = Field(
         default="", validation_alias="TELEGRAM_WEBHOOK_SECRET"

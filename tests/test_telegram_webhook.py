@@ -45,6 +45,30 @@ def test_telegram_webhook_accepts_update(tmp_path, monkeypatch):
     assert any("done:привет" in text for _, text in sent_messages)
 
 
+def test_agent_webhook_uses_agent_as_default(tmp_path, monkeypatch):
+    sent_messages: list[tuple[str, str]] = []
+    fake_agent = FakeAgent()
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append((str(chat_id), text))
+        return True
+
+    monkeypatch.setattr(web_app, "chat_store", ChatHistoryStore(tmp_path))
+    monkeypatch.setattr(web_app, "_agents", {"developer": fake_agent})
+    monkeypatch.setattr(web_app, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+
+    client = TestClient(web_app.app)
+    response = client.post(
+        "/api/telegram/webhook/developer",
+        json=telegram_update("проверь код"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["agent_id"] == "developer"
+    assert any("done:проверь код" in text for _, text in sent_messages)
+
+
 def test_telegram_webhook_rejects_wrong_secret(monkeypatch):
     class SecretSettings:
         telegram_webhook_secret = "expected"
@@ -69,3 +93,8 @@ def test_parse_telegram_agent_commands():
         "задача",
         False,
     )
+    assert web_app._parse_telegram_agent_command(
+        None,
+        "задача",
+        default_agent_id="developer",
+    ) == ("developer", "задача", False)

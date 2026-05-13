@@ -23,6 +23,13 @@ OPENAI_API_KEY=sk-...
 OPENAI_DEFAULT_MODEL=gpt-4o-mini
 OPENAI_HEAVY_MODEL=gpt-4o
 TELEGRAM_BOT_TOKEN=123456789:...
+TELEGRAM_PMO_BOT_TOKEN=123456789:...
+TELEGRAM_DATA_ANALYST_BOT_TOKEN=123456789:...
+TELEGRAM_DEVELOPER_BOT_TOKEN=123456789:...
+TELEGRAM_COPYWRITER_BOT_TOKEN=123456789:...
+TELEGRAM_SUPPORT_BOT_TOKEN=123456789:...
+TELEGRAM_STRATEGIST_BOT_TOKEN=123456789:...
+TELEGRAM_ACCOUNTANT_BOT_TOKEN=123456789:...
 TELEGRAM_CHAT_ID=123456789
 TELEGRAM_WEBHOOK_SECRET=long-random-string
 ```
@@ -72,12 +79,46 @@ LOG_LEVEL=INFO
 
 ## Telegram chat / channel webhook
 
-Чтобы Telegram стал рабочим чатом для агентов, добавьте бота в группу или канал
-и назначьте webhook на production-домен:
+Чтобы Telegram стал рабочим чатом для агентов, добавьте нужных ботов в группу
+или канал и назначьте webhook на production-домен.
+
+Один общий PMO bot:
 
 ```bash
 curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
   -d "url=https://ai-office-one.vercel.app/api/telegram/webhook" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+```
+
+Отдельный bot на каждого агента:
+
+```bash
+curl "https://api.telegram.org/bot<TELEGRAM_PMO_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook/pmo" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+
+curl "https://api.telegram.org/bot<TELEGRAM_DATA_ANALYST_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook/data_analyst" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+
+curl "https://api.telegram.org/bot<TELEGRAM_DEVELOPER_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook/developer" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+
+curl "https://api.telegram.org/bot<TELEGRAM_COPYWRITER_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook/copywriter" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+
+curl "https://api.telegram.org/bot<TELEGRAM_SUPPORT_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook/support" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+
+curl "https://api.telegram.org/bot<TELEGRAM_STRATEGIST_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook/strategist" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+
+curl "https://api.telegram.org/bot<TELEGRAM_ACCOUNTANT_BOT_TOKEN>/setWebhook" \
+  -d "url=https://ai-office-one.vercel.app/api/telegram/webhook/accountant" \
   -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
