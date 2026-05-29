@@ -1,18 +1,23 @@
 """Конфигурация приложения через pydantic-settings + YAML."""
 
+from __future__ import annotations
+
+import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Environment(str, Enum):
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"
+
 
 class Settings(BaseSettings):
     """Глобальные настройки, загружаемые из .env и config/settings.yaml."""
@@ -21,6 +26,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # ── API Keys ───────────────────────────────────────────────────────
@@ -36,7 +42,7 @@ class Settings(BaseSettings):
 
     # ── Vector DB ──────────────────────────────────────────────────────
     database_url: str = Field(
-        default="postgresql+psycopg2://user:password@localhost:5432/ai_office",
+        default="sqlite:///data/ai_office.db",
         validation_alias="DATABASE_URL",
     )
     pinecone_api_key: str = Field(default="", validation_alias="PINECONE_API_KEY")
@@ -101,10 +107,99 @@ class Settings(BaseSettings):
     jira_api_token: str = Field(default="", validation_alias="JIRA_API_TOKEN")
 
     # ── App ────────────────────────────────────────────────────────────
+    ai_office_api_key: str = Field(default="", validation_alias="AI_OFFICE_API_KEY")
+    ai_office_allowed_origins: str = Field(
+        default="http://localhost:8000,http://localhost:5173,http://127.0.0.1:8000,http://127.0.0.1:5173",
+        validation_alias="AI_OFFICE_ALLOWED_ORIGINS",
+    )
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT, validation_alias="ENVIRONMENT"
     )
+
+    # ── Telegram access control ────────────────────────────────────────
+    allowed_telegram_user_ids: str = Field(
+        default="", validation_alias="ALLOWED_TELEGRAM_USER_IDS"
+    )
+    allowed_telegram_chat_ids: str = Field(
+        default="", validation_alias="ALLOWED_TELEGRAM_CHAT_IDS"
+    )
+
+    # ── Autonomous runtime ─────────────────────────────────────────────
+    autonomy_enabled: bool = Field(default=False, validation_alias="AUTONOMY_ENABLED")
+    autonomy_daily_plan_hour: int = Field(
+        default=9, validation_alias="AUTONOMY_DAILY_PLAN_HOUR"
+    )
+    autonomy_evening_review_hour: int = Field(
+        default=19, validation_alias="AUTONOMY_EVENING_REVIEW_HOUR"
+    )
+    autonomy_poll_interval_seconds: int = Field(
+        default=1800, validation_alias="AUTONOMY_POLL_INTERVAL_SECONDS"
+    )
+    autonomy_timezone: str = Field(
+        default="Asia/Almaty", validation_alias="AUTONOMY_TIMEZONE"
+    )
+    ai_office_task_stuck_timeout_minutes: int = Field(
+        default=30, validation_alias="AI_OFFICE_TASK_STUCK_TIMEOUT_MINUTES"
+    )
+    ai_office_task_max_retries: int = Field(
+        default=2, validation_alias="AI_OFFICE_TASK_MAX_RETRIES"
+    )
+    ai_office_approval_ttl_hours: int = Field(
+        default=24, validation_alias="AI_OFFICE_APPROVAL_TTL_HOURS"
+    )
+
+    # ── Safe developer tools ──────────────────────────────────────────
+    ai_office_workspace_root: str = Field(
+        default="workspaces", validation_alias="AI_OFFICE_WORKSPACE_ROOT"
+    )
+    ai_office_allow_file_writes: bool = Field(
+        default=False, validation_alias="AI_OFFICE_ALLOW_FILE_WRITES"
+    )
+    ai_office_safe_commands: str = Field(
+        default="pytest,python -m pytest,npm test,npm run build",
+        validation_alias="AI_OFFICE_SAFE_COMMANDS",
+    )
+
+    @field_validator("log_level")
+    @classmethod
+    def _normalize_log_level(cls, v: str) -> str:
+        v = v.upper().strip()
+        if v not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ValueError(f"Invalid LOG_LEVEL: {v}")
+        return v
+
+    @field_validator("environment")
+    @classmethod
+    def _normalize_env(cls, v: str | Environment) -> Environment:
+        if isinstance(v, Environment):
+            return v
+        return Environment(v.lower().strip())
+
+    def require(self, *keys: str) -> None:
+        """Raise if any required env vars are empty."""
+        missing = [k for k in keys if not getattr(self, k, "").strip()]
+        if missing:
+            raise EnvironmentError(
+                f"Missing required environment variables: {', '.join(missing)}"
+            )
+
+    def allowed_origins_list(self) -> list[str]:
+        """Return configured CORS origins as a normalized list."""
+        return [
+            origin.strip()
+            for origin in self.ai_office_allowed_origins.split(",")
+            if origin.strip()
+        ]
+
+    def safe_commands_list(self) -> list[str]:
+        """Return allowlisted shell commands for the safe tools layer."""
+        return [
+            command.strip()
+            for command in self.ai_office_safe_commands.split(",")
+            if command.strip()
+        ]
+
 
 def load_agent_config() -> dict[str, Any]:
     """Загрузить YAML-конфигурацию агентов из config/settings.yaml."""
@@ -113,6 +208,7 @@ def load_agent_config() -> dict[str, Any]:
         return {}
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

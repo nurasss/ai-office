@@ -1,21 +1,16 @@
-# AI Office — Полностью автономный цифровой ИИ-офис
+# AI Office — личный автономный AI office
 
-Мультиагентная система из 7 специализированных ИИ-сотрудников, оркеструемых через LangGraph.
+Мультиагентная FastAPI-система из 7 ИИ-сотрудников с Telegram-интерфейсом, RAG/knowledge-слоем и первым autonomous runtime. Текущий уровень: личный 24/7 MVP/autonomous core, а не enterprise worker-платформа.
 
 ## Архитектура
 
 ```
-                ┌──────────────┐
-                │  CEO / User  │
-                └──────┬───────┘
-                       │
-                ┌──────▼───────┐
-                │  PMO_Agent   │  ← Оркестратор (entry point)
-                └──────┬───────┘
-                       │
-        ┌──────┬───────┼───────┬────────┬──────────┐
-        ▼      ▼       ▼       ▼        ▼          ▼
-   DataAnalyst Dev   Copy   Support  Strategist  Accountant
+Telegram / Web / API
+  -> PMO / agent routing
+  -> Task Engine
+  -> SQLAlchemy DB (PostgreSQL or local SQLite)
+  -> Autonomous scheduler
+  -> Safe action policy + approvals
 ```
 
 ## Быстрый старт
@@ -25,27 +20,30 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Вставить реальные API-ключи в .env
+# Заполнить AI_OFFICE_API_KEY, TELEGRAM_WEBHOOK_SECRET, whitelist и LLM keys
+alembic upgrade head
+python run.py
+```
+
+Проверка:
+
+```bash
+curl http://localhost:8000/health
+curl -H "X-API-Key: <AI_OFFICE_API_KEY>" http://localhost:8000/api/autonomous/status
 ```
 
 ## Агенты
 
-| Агент | Роль | Модель |
-|-------|------|--------|
-| PMO_Agent | Оркестратор, декомпозиция задач | Claude Sonnet 4.6 |
-| DataAnalyst_Agent | Анализ данных и метрик | GPT-5.5 |
-| Developer_Agent | Написание и ревью кода | Claude 4.7 Opus |
-| Copywriter_Agent | Контент и тексты | Claude Sonnet 4.6 |
-| Support_Agent | Техподдержка (L1→L2 эскалация) | Sonnet 4.6 / Opus 4.7 |
-| Strategist_Agent | Анализ рынка, документы | Gemini 3.1 Pro |
-| Accountant_Agent | Сверка инвойсов (zero-hallucination) | Sonnet 4.6 / Opus 4.7 |
+PMO, Developer, DataAnalyst, Copywriter, Support, Strategist и Accountant. Модели берутся из `config/settings.yaml` и env, поэтому код не привязан жестко к одному провайдеру.
 
 ## Структура проекта
 
 ```
 ai_office/
 ├── agents/          # Классы агентов
-├── core/            # LLM-роутер, конфиг, state, логгер
+├── api/             # Product API и autonomous runtime API
+├── core/            # Auth, DB, модели, schemas, LLM router, config
+├── services/        # Projects/tasks/approvals/autonomy/tools services
 ├── prompts/         # System prompts (YAML)
 ├── tools/           # MCP-инструменты (Slack, Jira, GitHub, ERP)
 ├── rag/             # Векторная БД (pgvector / Pinecone)
@@ -83,11 +81,12 @@ python3 scripts/smoke_first_task.py --route-only
 
 ## Product API
 
-Основной endpoint для веба, Telegram-бота или Mini App:
+Product API защищен `AI_OFFICE_API_KEY`:
 
 ```bash
 curl -X POST http://localhost:8000/api/office/tasks \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: <AI_OFFICE_API_KEY>" \
   -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","agent_id":"pmo"}'
 ```
 
@@ -96,5 +95,46 @@ curl -X POST http://localhost:8000/api/office/tasks \
 ```bash
 curl -X POST http://localhost:8000/api/office/tasks \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: <AI_OFFICE_API_KEY>" \
   -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","route_only":true}'
+```
+
+## Autonomous Runtime
+
+Новый слой хранит `projects`, `tasks`, `task_events`, `agent_runs`, `approvals`, `memories` и `tool_runs` в базе. Локально используется `sqlite:///data/ai_office.db`; для 24/7 лучше PostgreSQL через `DATABASE_URL`.
+
+Для persistent deployment используйте Alembic:
+
+```bash
+alembic upgrade head
+```
+
+`init_db()` остается fallback-ом для локальных smoke-прогонов и тестов. Новую миграцию позже можно создать так:
+
+```bash
+alembic revision --autogenerate -m "describe_change"
+alembic upgrade head
+```
+
+Основные endpoints:
+
+```bash
+curl -H "X-API-Key: <AI_OFFICE_API_KEY>" http://localhost:8000/api/projects
+curl -X POST -H "X-API-Key: <AI_OFFICE_API_KEY>" -H "Content-Type: application/json" \
+  http://localhost:8000/api/projects \
+  -d '{"slug":"ai-office","name":"AI Office","goal":"24/7 autonomous core"}'
+curl -X POST -H "X-API-Key: <AI_OFFICE_API_KEY>" http://localhost:8000/api/autonomy/daily-plan
+```
+
+Telegram-команды: `/tasks`, `/tasks today`, `/projects`, `/project ai-office`, `/plan`, `/approve <id>`, `/reject <id>`, `/autonomy status`, `/autonomy on`, `/autonomy off`.
+
+Автоматически разрешены read-only проверки, планирование, task/status updates, draft results и подготовка patch/prompt. Deploy, push/merge, удаление файлов, env/secrets, CRM/email/money actions и произвольные shell-команды требуют approval. Pending approvals истекают по `AI_OFFICE_APPROVAL_TTL_HOURS`; stuck/failed задачи ограничены retry budget через `AI_OFFICE_TASK_MAX_RETRIES`.
+
+Подробнее: `docs/AUTONOMOUS_RUNTIME.md`, `docs/SECURITY.md`, `docs/TELEGRAM_COMMANDS.md`.
+
+## Тесты
+
+```bash
+python -m pytest -q
+ruff check .
 ```

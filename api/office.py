@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from agents import (
@@ -18,13 +19,19 @@ from agents import (
     StrategistAgent,
     SupportAgent,
 )
+from core.agent_events import publish_agent_status, reset_agent_status_later
+from core.auth import require_api_key
 from core.llm_router import MissingLLMCredentialsError
 from core.logger import get_logger
 from rag.retriever import Retriever
 from tools.external.telegram import send_telegram_message
 
 logger = get_logger("api.office")
-router = APIRouter(prefix="/api/office", tags=["office"])
+router = APIRouter(
+    prefix="/api/office",
+    tags=["office"],
+    dependencies=[Depends(require_api_key)],
+)
 
 AGENT_REGISTRY: dict[str, type[BaseAgent]] = {
     "pmo": PMOAgent,
@@ -124,17 +131,37 @@ async def submit_office_task(request: OfficeTaskRequest) -> OfficeTaskResponse:
     if requested_agent not in AGENT_REGISTRY:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {requested_agent}")
 
+    await publish_agent_status(
+        requested_agent,
+        "routing" if requested_agent == "pmo" else "queued",
+        message="Задача получена",
+    )
     route = (
         await route_with_pmo(request.task)
         if requested_agent == "pmo"
         else {"handled_by": requested_agent, "subtasks": []}
     )
     handled_by = route["handled_by"]
+    if requested_agent == "pmo" and handled_by != "pmo":
+        await publish_agent_status(
+            "pmo",
+            "delegated",
+            message=f"Маршрут передан: {AGENT_NAMES.get(handled_by, handled_by)}",
+            handled_by=handled_by,
+        )
+        asyncio.create_task(reset_agent_status_later("pmo", delay_seconds=1.8))
     rag_documents = await Retriever(agent_id=handled_by).retrieve(request.task)
     rag_hits = [to_rag_hit(document) for document in rag_documents]
     task_id = f"api_{uuid.uuid4().hex[:8]}"
 
     if request.route_only:
+        await publish_agent_status(
+            handled_by,
+            "routed",
+            message="Маршрут выбран",
+            task_id=task_id,
+        )
+        asyncio.create_task(reset_agent_status_later(handled_by, task_id=task_id))
         return OfficeTaskResponse(
             status="routed",
             task_id=task_id,
@@ -146,6 +173,12 @@ async def submit_office_task(request: OfficeTaskRequest) -> OfficeTaskResponse:
         )
 
     agent = get_agent(handled_by)
+    await publish_agent_status(
+        handled_by,
+        "thinking",
+        message="Готовит ответ",
+        task_id=task_id,
+    )
     rag_context = "\n\n".join(
         str(document.get("content", "")).strip()
         for document in rag_documents
@@ -160,7 +193,27 @@ async def submit_office_task(request: OfficeTaskRequest) -> OfficeTaskResponse:
             max_tokens=2400,
         )
     except MissingLLMCredentialsError as error:
+        await publish_agent_status(
+            handled_by,
+            "error",
+            message="Не настроены LLM credentials",
+            task_id=task_id,
+        )
+        asyncio.create_task(
+            reset_agent_status_later(handled_by, delay_seconds=4, task_id=task_id)
+        )
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception:
+        await publish_agent_status(
+            handled_by,
+            "error",
+            message="Не удалось завершить задачу",
+            task_id=task_id,
+        )
+        asyncio.create_task(
+            reset_agent_status_later(handled_by, delay_seconds=4, task_id=task_id)
+        )
+        raise
 
     telegram_notified = False
     if request.notify_telegram:
@@ -170,6 +223,14 @@ async def submit_office_task(request: OfficeTaskRequest) -> OfficeTaskResponse:
             result=result,
             task_id=task_id,
         )
+
+    await publish_agent_status(
+        handled_by,
+        "done",
+        message="Ответ готов",
+        task_id=task_id,
+    )
+    asyncio.create_task(reset_agent_status_later(handled_by, task_id=task_id))
 
     return OfficeTaskResponse(
         status="ok",

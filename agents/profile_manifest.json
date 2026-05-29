@@ -1,0 +1,138 @@
+[
+  {
+    "id": "developer.backend_architect",
+    "name": "Backend Architect",
+    "base_agent": "developer",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/developer.backend_architect.md",
+    "description": "Designs backend architecture, APIs, service boundaries, and persistence changes.",
+    "model_tier": "working",
+    "allowed_tools": ["filesystem.read", "filesystem.write_patch", "tests.run"],
+    "rag_namespace": "developer",
+    "output_contract": "architecture_plan"
+  },
+  {
+    "id": "developer.code_reviewer",
+    "name": "Code Reviewer",
+    "base_agent": "developer",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/developer.code_reviewer.md",
+    "description": "Reviews code for bugs, regressions, maintainability, and safety.",
+    "model_tier": "working",
+    "allowed_tools": ["filesystem.read", "tests.run"],
+    "rag_namespace": "developer",
+    "output_contract": "review_findings"
+  },
+  {
+    "id": "developer.mcp_builder",
+    "name": "MCP Builder",
+    "base_agent": "developer",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/developer.mcp_builder.md",
+    "description": "Builds safe, typed MCP tools and integration adapters.",
+    "model_tier": "escalation",
+    "allowed_tools": ["filesystem.read", "filesystem.write_patch", "tests.run"],
+    "rag_namespace": "developer",
+    "output_contract": "implementation_plan_or_patch",
+    "quality_gate": {
+      "reviewer_profile": "developer.code_reviewer",
+      "min_score": 85
+    }
+  },
+  {
+    "id": "developer.security_engineer",
+    "name": "Security Engineer",
+    "base_agent": "developer",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/developer.security_engineer.md",
+    "description": "Reviews auth, secrets, access control, and action policy.",
+    "model_tier": "escalation",
+    "allowed_tools": ["filesystem.read", "tests.run"],
+    "rag_namespace": "developer",
+    "output_contract": "security_review"
+  },
+  {
+    "id": "developer.devops_automator",
+    "name": "DevOps Automator",
+    "base_agent": "developer",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/developer.devops_automator.md",
+    "description": "Prepares deployment, CI, Docker, and server automation plans.",
+    "model_tier": "escalation",
+    "allowed_tools": ["filesystem.read", "filesystem.write_patch", "tests.run"],
+    "rag_namespace": "developer",
+    "output_contract": "runbook_or_patch"
+  },
+  {
+    "id": "pmo.project_manager",
+    "name": "Project Manager",
+    "base_agent": "pmo",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/pmo.project_manager.md",
+    "description": "Turns goals into prioritized tasks and daily project plans.",
+    "model_tier": "working",
+    "allowed_tools": ["memory.search", "tasks.create"],
+    "rag_namespace": "pmo",
+    "output_contract": "task_plan"
+  },
+  {
+    "id": "copywriter.technical_writer",
+    "name": "Technical Writer",
+    "base_agent": "copywriter",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/copywriter.technical_writer.md",
+    "description": "Writes docs, manuals, runbooks, and API notes.",
+    "model_tier": "working",
+    "allowed_tools": ["filesystem.read", "filesystem.write_patch"],
+    "rag_namespace": "copywriter",
+    "output_contract": "markdown_doc"
+  },
+  {
+    "id": "support.customer_support",
+    "name": "Customer Support Specialist",
+    "base_agent": "support",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/support.customer_support.md",
+    "description": "Triages support tickets, FAQs, and response drafts.",
+    "model_tier": "working",
+    "allowed_tools": ["memory.search"],
+    "rag_namespace": "support",
+    "output_contract": "support_response_draft"
+  },
+  {
+    "id": "analyst.data_engineer",
+    "name": "Data Engineer",
+    "base_agent": "data_analyst",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/analyst.data_engineer.md",
+    "description": "Plans safe data workflows, CSV analysis, and analytics pipelines.",
+    "model_tier": "working",
+    "allowed_tools": ["filesystem.read", "tests.run"],
+    "rag_namespace": "data_analyst",
+    "output_contract": "data_workflow_plan"
+  },
+  {
+    "id": "strategist.product_strategist",
+    "name": "Product Strategist",
+    "base_agent": "strategist",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/strategist.product_strategist.md",
+    "description": "Shapes product strategy, positioning, and roadmap choices.",
+    "model_tier": "working",
+    "allowed_tools": ["memory.search"],
+    "rag_namespace": "strategist",
+    "output_contract": "strategy_brief"
+  },
+  {
+    "id": "accountant.document_reviewer",
+    "name": "Document Reviewer",
+    "base_agent": "accountant",
+    "source": "agency-agents-adapted",
+    "source_path": "agents/imported_agency/accountant.document_reviewer.md",
+    "description": "Reviews invoices, acts, receipts, and accounting document drafts.",
+    "model_tier": "working",
+    "allowed_tools": ["filesystem.read"],
+    "rag_namespace": "accountant",
+    "output_contract": "document_review"
+  }
+]
