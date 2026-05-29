@@ -42,6 +42,7 @@ workspaces/
 *.sqlite
 *.sqlite3
 reports.pdf
+*.zip
 reports/
 .vercel
 reports/

@@ -16,6 +16,7 @@ workspaces/
 *.db
 *.sqlite
 *.sqlite3
+*.zip
 *.pem
 *.key
 AI_Office_business_case.pdf
