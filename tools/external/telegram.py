@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import urllib.parse
 import urllib.request
 
@@ -21,6 +22,18 @@ AGENT_TOKEN_FIELDS = {
     "strategist": "telegram_strategist_bot_token",
     "accountant": "telegram_accountant_bot_token",
 }
+
+
+def sanitize_telegram_text(text: str) -> str:
+    """Convert common Markdown formatting to plain Telegram text."""
+    cleaned = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
+    cleaned = re.sub(r"```(?:[a-zA-Z0-9_-]+)?\n?([\s\S]*?)```", r"\1", cleaned)
+    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
+    cleaned = re.sub(r"(\*\*|__)(.*?)\1", r"\2", cleaned)
+    cleaned = re.sub(r"(\*|_)(.*?)\1", r"\2", cleaned)
+    cleaned = re.sub(r"^#{1,6}\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^[>-]\s+", "", cleaned, flags=re.MULTILINE)
+    return cleaned.strip()
 
 
 def get_telegram_bot_token(agent_id: str | None = None) -> str:
@@ -59,7 +72,7 @@ def _send_telegram_message_sync(
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload_data = {
         "chat_id": chat_id,
-        "text": text[:3900],
+        "text": sanitize_telegram_text(text)[:3900],
         "disable_web_page_preview": "true",
     }
     if reply_to_message_id is not None:

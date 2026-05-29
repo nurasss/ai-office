@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Request
@@ -1353,6 +1355,49 @@ async def health():
             "anthropic": bool(settings.anthropic_api_key.strip()),
             "google": bool(settings.google_api_key.strip()),
         },
+    }
+
+
+@app.get("/api/cron/autonomy-tick")
+async def autonomy_cron_tick(request: Request):
+    """Run autonomous polling from Vercel Cron instead of relying on a warm process."""
+    settings = get_settings()
+    expected = settings.cron_secret.strip()
+    if not expected:
+        return JSONResponse({"error": "CRON_SECRET is not configured"}, status_code=503)
+
+    actual = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(actual, f"Bearer {expected}"):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if not get_autonomy_enabled():
+        return {
+            "status": "skipped",
+            "reason": "autonomy_disabled",
+            "autonomy_enabled": False,
+        }
+
+    init_db()
+    with get_session() as db:
+        service = AutonomyService(db)
+        poll_result = await service.poll_queued_tasks(notify=True)
+
+        tz = ZoneInfo(settings.autonomy_timezone)
+        now = datetime.now(tz)
+        daily_plan = None
+        evening_review = None
+        if now.hour == settings.autonomy_daily_plan_hour:
+            daily_plan = (await service.daily_plan(notify=True)).model_dump()
+        if now.hour == settings.autonomy_evening_review_hour:
+            evening_review = await service.evening_review(notify=True)
+
+    return {
+        "status": "ok",
+        "autonomy_enabled": True,
+        "now": now.isoformat(timespec="seconds"),
+        "poll": poll_result,
+        "daily_plan": daily_plan,
+        "evening_review": evening_review,
     }
 
 

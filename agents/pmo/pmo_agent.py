@@ -1,6 +1,7 @@
 """PMO Agent — оркестратор, точка входа в граф."""
 
 import json
+import re
 from typing import Any, Sequence
 
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -22,6 +23,108 @@ PMO_TOOLS: list[BaseTool] = [
     search_jira_issues,
     send_slack_message,
 ]
+
+
+ROUTING_PATTERNS: dict[AgentRole, tuple[str, ...]] = {
+    AgentRole.STRATEGIST: (
+        r"\bmarket\b",
+        r"\bcompetitor",
+        r"\bstrategy\b",
+        r"\bswot\b",
+        r"\bpestel\b",
+        r"\bokr\b",
+        r"\bnews\b",
+        r"\bfintech\b",
+        r"рын(ок|ка|ке|ку|ком)",
+        r"новост",
+        r"тренд",
+        r"конкурент",
+        r"стратег",
+        r"бизнес[- ]?план",
+        r"плат[её]ж",
+        r"финтех",
+        r"казахстан",
+        r"последн(юю|ей|ие|их)",
+        r"недел",
+    ),
+    AgentRole.DATA_ANALYST: (
+        r"\bsql\b",
+        r"\bkpi\b",
+        r"\bltv\b",
+        r"\bcac\b",
+        r"\bcsv\b",
+        r"данн",
+        r"метрик",
+        r"дашборд",
+        r"аналити[кч]",
+        r"отч[её]т",
+        r"таблиц",
+    ),
+    AgentRole.DEVELOPER: (
+        r"\bapi\b",
+        r"\bgithub\b",
+        r"\bswagger\b",
+        r"\bpull request\b",
+        r"код",
+        r"программ",
+        r"разработ",
+        r"ревью",
+        r"баг",
+        r"депло",
+    ),
+    AgentRole.COPYWRITER: (
+        r"\bemail\b",
+        r"текст",
+        r"контент",
+        r"стат(ь|ья|ью|ьи)",
+        r"пост",
+        r"рассыл",
+        r"пресс[- ]?релиз",
+        r"копирайт",
+    ),
+    AgentRole.SUPPORT: (
+        r"\bfaq\b",
+        r"поддержк",
+        r"проблем",
+        r"ошибк",
+        r"тикет",
+        r"инцидент",
+        r"клиентск",
+    ),
+    AgentRole.ACCOUNTANT: (
+        r"инвойс",
+        r"\bсч[её]т\b",
+        r"\bсч[её]та\b",
+        r"\bсч[её]ту\b",
+        r"\bакт\b",
+        r"\bакта\b",
+        r"\bакту\b",
+        r"\bндс\b",
+        r"налог",
+        r"договор",
+        r"сверк",
+        r"бухгалтер",
+        r"первичн(ые|ая|ую|ых) документ",
+    ),
+}
+
+
+def _route_task_by_rules(task: str) -> AgentRole:
+    """Route by weighted keyword rules without matching short substrings."""
+    normalized = task.lower().replace("ё", "е")
+    scores: dict[AgentRole, int] = {role: 0 for role in ROUTING_PATTERNS}
+    for role, patterns in ROUTING_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, normalized, flags=re.IGNORECASE):
+                scores[role] += 1
+
+    # Market/news requests often contain finance words, but they need strategy/research.
+    if scores[AgentRole.STRATEGIST] >= 2:
+        return AgentRole.STRATEGIST
+
+    best_role = max(scores, key=scores.get)
+    return best_role if scores[best_role] > 0 else AgentRole.DATA_ANALYST
+
 
 class PMOAgent(BaseAgent):
     """Project Management Officer — оркестратор задач.
@@ -68,64 +171,8 @@ class PMOAgent(BaseAgent):
 
         В продакшене — LLM вызов. Здесь — заглушка с маршрутизацией по ключевым словам.
         """
-        task_lower = task.lower()
         subtasks: list[SubTask] = []
-
-        # Простая эвристика маршрутизации (в продакшене — LLM-вызов)
-        keyword_map: dict[str, AgentRole] = {
-            "sql": AgentRole.DATA_ANALYST,
-            "данные": AgentRole.DATA_ANALYST,
-            "метрик": AgentRole.DATA_ANALYST,
-            "kpi": AgentRole.DATA_ANALYST,
-            "ltv": AgentRole.DATA_ANALYST,
-            "cac": AgentRole.DATA_ANALYST,
-            "дашборд": AgentRole.DATA_ANALYST,
-            "анализ данных": AgentRole.DATA_ANALYST,
-            "код": AgentRole.DEVELOPER,
-            "программ": AgentRole.DEVELOPER,
-            "разработ": AgentRole.DEVELOPER,
-            "ревью": AgentRole.DEVELOPER,
-            "pull request": AgentRole.DEVELOPER,
-            "github": AgentRole.DEVELOPER,
-            "api": AgentRole.DEVELOPER,
-            "swagger": AgentRole.DEVELOPER,
-            "текст": AgentRole.COPYWRITER,
-            "контент": AgentRole.COPYWRITER,
-            "стать": AgentRole.COPYWRITER,
-            "пост": AgentRole.COPYWRITER,
-            "email": AgentRole.COPYWRITER,
-            "рассыл": AgentRole.COPYWRITER,
-            "пресс-релиз": AgentRole.COPYWRITER,
-            "поддержк": AgentRole.SUPPORT,
-            "проблем": AgentRole.SUPPORT,
-            "ошибк": AgentRole.SUPPORT,
-            "баг": AgentRole.SUPPORT,
-            "тикет": AgentRole.SUPPORT,
-            "faq": AgentRole.SUPPORT,
-            "инцидент": AgentRole.SUPPORT,
-            "рынок": AgentRole.STRATEGIST,
-            "стратеги": AgentRole.STRATEGIST,
-            "конкурент": AgentRole.STRATEGIST,
-            "swot": AgentRole.STRATEGIST,
-            "pestel": AgentRole.STRATEGIST,
-            "okr": AgentRole.STRATEGIST,
-            "бизнес-план": AgentRole.STRATEGIST,
-            "инвойс": AgentRole.ACCOUNTANT,
-            "счёт": AgentRole.ACCOUNTANT,
-            "счет": AgentRole.ACCOUNTANT,
-            "финанс": AgentRole.ACCOUNTANT,
-            "сверк": AgentRole.ACCOUNTANT,
-            "акт": AgentRole.ACCOUNTANT,
-            "ндс": AgentRole.ACCOUNTANT,
-            "налог": AgentRole.ACCOUNTANT,
-            "договор": AgentRole.ACCOUNTANT,
-        }
-
-        assigned_role = AgentRole.DATA_ANALYST  # fallback
-        for keyword, role in keyword_map.items():
-            if keyword in task_lower:
-                assigned_role = role
-                break
+        assigned_role = _route_task_by_rules(task)
 
         subtasks.append({
             "task_id": f"subtask_{assigned_role.value}_001",

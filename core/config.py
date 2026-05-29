@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     autonomy_timezone: str = Field(
         default="Asia/Almaty", validation_alias="AUTONOMY_TIMEZONE"
     )
+    cron_secret: str = Field(default="", validation_alias="CRON_SECRET")
     ai_office_task_stuck_timeout_minutes: int = Field(
         default=30, validation_alias="AI_OFFICE_TASK_STUCK_TIMEOUT_MINUTES"
     )

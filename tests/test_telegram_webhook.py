@@ -5,6 +5,7 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 
 import web.app as web_app
+import services.autonomy_service as autonomy_service
 from core.chat_history import ChatHistoryStore
 from core.config import get_settings
 from core.db import get_session, init_db, reset_db_engine
@@ -29,6 +30,10 @@ class FakeSettings:
     telegram_accountant_thread_id = ""
     autonomy_enabled = False
     autonomy_poll_interval_seconds = 1800
+    autonomy_daily_plan_hour = 9
+    autonomy_evening_review_hour = 19
+    autonomy_timezone = "Asia/Almaty"
+    cron_secret = "cron-secret"
     telegram_bot_token = ""
     telegram_chat_id = ""
     openai_api_key = ""
@@ -348,6 +353,53 @@ def test_autonomy_status_command_shows_runtime_summary(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert any("Autonomy:" in str(message["text"]) and "1 queued" in str(message["text"]) for message in sent_messages)
+
+
+def test_autonomy_cron_tick_runs_queued_tasks(tmp_path, monkeypatch):
+    class AutonomySettings(FakeSettings):
+        autonomy_enabled = True
+
+    notifications: list[str] = []
+
+    async def fake_notify(text):
+        notifications.append(text)
+        return True
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'cron.db'}")
+    get_settings.cache_clear()
+    reset_db_engine()
+    init_db()
+    with get_session() as db:
+        TaskService(db).create_task(TaskCreate(title="Autonomous safe task", status="queued"))
+
+    monkeypatch.setattr(web_app, "get_settings", lambda: AutonomySettings())
+    monkeypatch.setattr(web_app, "send_telegram_message", fake_notify)
+    monkeypatch.setattr(autonomy_service, "send_telegram_message", fake_notify)
+    monkeypatch.setattr(autonomy_service, "_autonomy_enabled_override", True)
+
+    client = TestClient(web_app.app)
+    response = client.get(
+        "/api/cron/autonomy-tick",
+        headers={"Authorization": "Bearer cron-secret"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["poll"]["completed"] == [1]
+    assert any("завершена" in text for text in notifications)
+
+
+def test_autonomy_cron_tick_rejects_wrong_secret(monkeypatch):
+    monkeypatch.setattr(web_app, "get_settings", lambda: FakeSettings())
+
+    client = TestClient(web_app.app)
+    response = client.get(
+        "/api/cron/autonomy-tick",
+        headers={"Authorization": "Bearer wrong"},
+    )
+
+    assert response.status_code == 401
 
 
 def test_inline_callback_approve_works_for_allowed_user(tmp_path, monkeypatch):
