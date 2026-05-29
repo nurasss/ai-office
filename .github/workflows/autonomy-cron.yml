@@ -1,0 +1,22 @@
+name: AI Office autonomy cron
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call autonomy tick
+        env:
+          AI_OFFICE_CRON_URL: ${{ secrets.AI_OFFICE_CRON_URL }}
+          AI_OFFICE_CRON_SECRET: ${{ secrets.AI_OFFICE_CRON_SECRET }}
+        run: |
+          test -n "$AI_OFFICE_CRON_URL"
+          test -n "$AI_OFFICE_CRON_SECRET"
+          curl --fail --show-error --silent \
+            -H "Authorization: Bearer ${AI_OFFICE_CRON_SECRET}" \
+            "${AI_OFFICE_CRON_URL}"
