@@ -46,6 +46,17 @@ Existing agent commands still work:
 /agents
 ```
 
+Agents can use public read-only web context when a Telegram task clearly asks
+for current information, for example:
+
+```text
+/agent strategist актуальные новости рынка платежей в Казахстане
+/agent developer latest FastAPI docs по lifespan
+```
+
+This is search/read-only access. Approvals and dangerous-action policy still
+apply to deploys, pushes, writes, CRM/email/payment actions, and shell commands.
+
 ## Behavior
 
 - `/tasks`: shows open tasks grouped by project with status, agent, and priority.

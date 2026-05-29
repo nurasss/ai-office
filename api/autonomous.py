@@ -28,6 +28,7 @@ from services.autonomy_service import AutonomyService, get_autonomy_enabled
 from services.project_service import ProjectService
 from services.scheduler import autonomy_scheduler
 from services.task_service import TaskService
+from tools.external.telegram import telegram_runtime_configured
 
 router = APIRouter(
     prefix="/api",
@@ -202,13 +203,7 @@ async def autonomous_status(db: Session = Depends(get_db)):
 @router.get("/autonomous/health", response_model=RuntimeHealthResponse)
 async def autonomous_health():
     settings = get_settings()
-    telegram_configured = bool(
-        settings.telegram_bot_token.strip()
-        and settings.telegram_chat_id.strip()
-        and settings.telegram_webhook_secret.strip()
-        and settings.allowed_telegram_user_ids.strip()
-        and settings.allowed_telegram_chat_ids.strip()
-    )
+    telegram_configured = telegram_runtime_configured()
     db_ok = database_connected()
     return RuntimeHealthResponse(
         status="ok" if db_ok else "degraded",

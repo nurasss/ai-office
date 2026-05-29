@@ -6,6 +6,7 @@ from core.config import get_settings
 
 
 def auth_headers(monkeypatch):
+    monkeypatch.setenv("AI_OFFICE_REQUIRE_API_KEY", "true")
     monkeypatch.setenv("AI_OFFICE_API_KEY", "test-key")
     get_settings.cache_clear()
     return {"X-API-Key": "test-key"}

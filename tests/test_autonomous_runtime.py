@@ -19,6 +19,7 @@ from services.task_service import TaskService
 
 
 def configure_runtime(monkeypatch, tmp_path):
+    monkeypatch.setenv("AI_OFFICE_REQUIRE_API_KEY", "true")
     monkeypatch.setenv("AI_OFFICE_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'runtime.db'}")
     monkeypatch.setenv("AUTONOMY_ENABLED", "false")
@@ -29,6 +30,20 @@ def configure_runtime(monkeypatch, tmp_path):
     reset_db_engine()
     init_db()
     return {"X-API-Key": "test-key"}
+
+
+def test_api_key_is_disabled_by_default_for_personal_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'runtime-no-key.db'}")
+    monkeypatch.delenv("AI_OFFICE_REQUIRE_API_KEY", raising=False)
+    monkeypatch.delenv("AI_OFFICE_API_KEY", raising=False)
+    get_settings.cache_clear()
+    reset_db_engine()
+    init_db()
+    client = TestClient(web_app.app)
+
+    response = client.get("/api/projects")
+
+    assert response.status_code == 200
 
 
 def test_private_autonomous_api_requires_key(tmp_path, monkeypatch):

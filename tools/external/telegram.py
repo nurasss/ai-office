@@ -24,7 +24,7 @@ AGENT_TOKEN_FIELDS = {
 
 
 def get_telegram_bot_token(agent_id: str | None = None) -> str:
-    """Return an agent-specific bot token with fallback to the legacy token."""
+    """Return an agent-specific bot token with PMO/default fallback."""
     settings = get_settings()
     if agent_id:
         field_name = AGENT_TOKEN_FIELDS.get(agent_id)
@@ -32,7 +32,19 @@ def get_telegram_bot_token(agent_id: str | None = None) -> str:
             token = str(getattr(settings, field_name, "")).strip()
             if token:
                 return token
-    return settings.telegram_bot_token.strip()
+    return settings.telegram_bot_token.strip() or settings.telegram_pmo_bot_token.strip()
+
+
+def telegram_runtime_configured() -> bool:
+    """Return whether Telegram notifications/webhooks have enough local config."""
+    settings = get_settings()
+    return bool(
+        get_telegram_bot_token()
+        and settings.telegram_chat_id.strip()
+        and settings.telegram_webhook_secret.strip()
+        and settings.allowed_telegram_user_ids.strip()
+        and settings.allowed_telegram_chat_ids.strip()
+    )
 
 
 def _send_telegram_message_sync(

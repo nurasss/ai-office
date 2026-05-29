@@ -17,6 +17,7 @@
 
 ```text
 OPENAI_API_KEY=<secret>
+AI_OFFICE_REQUIRE_API_KEY=true
 AI_OFFICE_API_KEY=<long-random-secret>
 TELEGRAM_WEBHOOK_SECRET=<long-random-secret>
 ALLOWED_TELEGRAM_USER_IDS=<your-user-id>
@@ -82,6 +83,7 @@ gh repo create ai-office --private --source=. --remote=origin --push
 OPENAI_API_KEY=<secret>
 OPENAI_DEFAULT_MODEL=gpt-5.5
 OPENAI_HEAVY_MODEL=gpt-5.5
+AI_OFFICE_REQUIRE_API_KEY=true
 AI_OFFICE_API_KEY=<long-random-secret>
 DATABASE_URL=postgresql+psycopg2://ai_office:<password>@postgres:5432/ai_office
 TELEGRAM_BOT_TOKEN=<secret>
@@ -230,6 +232,7 @@ services:
       - "8000:8000"
     environment:
       ENVIRONMENT: production
+      AI_OFFICE_REQUIRE_API_KEY: "true"
       AI_OFFICE_API_KEY: ${AI_OFFICE_API_KEY}
       DATABASE_URL: postgresql+psycopg2://ai_office:${POSTGRES_PASSWORD}@postgres:5432/ai_office
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}

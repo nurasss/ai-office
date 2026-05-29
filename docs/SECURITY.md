@@ -23,20 +23,32 @@ workspaces/
 
 ## API Auth
 
-Set:
+For the personal Telegram-first runtime, API key auth is off by default:
 
 ```text
+AI_OFFICE_REQUIRE_API_KEY=false
+```
+
+This removes the `X-API-Key` requirement for local/personal API checks. Telegram
+is still protected by webhook secret and allowlists.
+
+For a public server, enable API key auth:
+
+```text
+AI_OFFICE_REQUIRE_API_KEY=true
 AI_OFFICE_API_KEY=replace-with-long-random-value
 ```
 
-Private/autonomous endpoints accept:
+When enabled, private/autonomous endpoints accept:
 
 ```text
 X-API-Key: <value>
 Authorization: Bearer <value>
 ```
 
-Public endpoints are limited to `/`, page templates/static assets, and `/health`. Telegram webhook is public only at the network level; it requires the Telegram secret header and whitelist. Private `/api/*` endpoints that read conversations/status or can spend model tokens require the API key.
+Telegram webhook is public only at the network level; it requires the Telegram
+secret header and whitelist. Keep `AI_OFFICE_REQUIRE_API_KEY=true` on any
+public deployment where `/api/*` is reachable by other people.
 
 ## Telegram Security
 
@@ -76,6 +88,7 @@ Automatically allowed:
 - creating and updating tasks;
 - plans, reports, draft results;
 - allowed file reads/searches inside `AI_OFFICE_WORKSPACE_ROOT`;
+- read-only public web search/fetch when `AI_OFFICE_WEB_ACCESS_ENABLED=true`;
 - safe allowlisted test/build commands.
 
 Requires approval:
@@ -98,5 +111,22 @@ Task lifecycle hardening:
 Forbidden by the tools layer:
 
 - path traversal outside workspace;
+- public web fetches to localhost/private IPs, non-http(s) schemes, or URLs with credentials;
 - shell metacharacters in commands;
 - obviously destructive command families such as `rm`, `sudo`, `ssh`, `docker`, `kubectl`, `vercel`.
+
+## Public Web Access
+
+Agents can use read-only public web context for tasks that look time-sensitive,
+for example "latest docs", "актуальные новости", prices, releases, laws, market
+or competitor checks.
+
+```text
+AI_OFFICE_WEB_ACCESS_ENABLED=true
+AI_OFFICE_WEB_SEARCH_MAX_RESULTS=5
+AI_OFFICE_WEB_FETCH_MAX_CHARS=6000
+```
+
+The web layer only reads public HTTP(S) pages. It blocks localhost, private IP
+ranges, `file://`, URLs with credentials, and non-text content. It does not log
+in, submit forms, buy anything, send messages, or bypass approvals.

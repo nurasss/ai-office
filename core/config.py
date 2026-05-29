@@ -108,6 +108,9 @@ class Settings(BaseSettings):
 
     # ── App ────────────────────────────────────────────────────────────
     ai_office_api_key: str = Field(default="", validation_alias="AI_OFFICE_API_KEY")
+    ai_office_require_api_key: bool = Field(
+        default=False, validation_alias="AI_OFFICE_REQUIRE_API_KEY"
+    )
     ai_office_allowed_origins: str = Field(
         default="http://localhost:8000,http://localhost:5173,http://127.0.0.1:8000,http://127.0.0.1:5173",
         validation_alias="AI_OFFICE_ALLOWED_ORIGINS",
@@ -159,6 +162,15 @@ class Settings(BaseSettings):
     ai_office_safe_commands: str = Field(
         default="pytest,python -m pytest,npm test,npm run build",
         validation_alias="AI_OFFICE_SAFE_COMMANDS",
+    )
+    ai_office_web_access_enabled: bool = Field(
+        default=True, validation_alias="AI_OFFICE_WEB_ACCESS_ENABLED"
+    )
+    ai_office_web_search_max_results: int = Field(
+        default=5, validation_alias="AI_OFFICE_WEB_SEARCH_MAX_RESULTS"
+    )
+    ai_office_web_fetch_max_chars: int = Field(
+        default=6000, validation_alias="AI_OFFICE_WEB_FETCH_MAX_CHARS"
     )
 
     @field_validator("log_level")

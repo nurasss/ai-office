@@ -13,6 +13,7 @@ from services.task_service import TaskService
 
 
 def configure_runtime(monkeypatch, tmp_path):
+    monkeypatch.setenv("AI_OFFICE_REQUIRE_API_KEY", "true")
     monkeypatch.setenv("AI_OFFICE_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'profiles.db'}")
     monkeypatch.setenv("AUTONOMY_ENABLED", "false")

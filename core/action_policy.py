@@ -44,6 +44,8 @@ SAFE_READ_ACTIONS = {
     "git_diff",
     "health_check",
     "memory_search",
+    "web_search",
+    "fetch_web_page",
 }
 
 SAFE_PREPARE_ACTIONS = {
@@ -153,4 +155,3 @@ def is_safe_command(command: str, safe_commands: list[str] | None = None) -> Pol
             return PolicyResult(ActionDecision.SAFE_READ, "Command is allowlisted.")
 
     return PolicyResult(ActionDecision.REQUIRES_APPROVAL, "Command is not allowlisted.")
-

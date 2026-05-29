@@ -5,6 +5,7 @@ from tools.external.jira import create_jira_issue, search_jira_issues
 from tools.external.slack import send_slack_message
 from tools.external.db_tools import run_sql_query
 from tools.external.erp import parse_invoice_pdf
+from tools.external.web_tools import fetch_web_page, web_search
 
 __all__ = [
     "read_github_repo",
@@ -14,4 +15,6 @@ __all__ = [
     "send_slack_message",
     "run_sql_query",
     "parse_invoice_pdf",
+    "web_search",
+    "fetch_web_page",
 ]

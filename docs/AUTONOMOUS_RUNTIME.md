@@ -41,7 +41,15 @@ alembic upgrade head
 
 ## API
 
-All autonomous endpoints require `AI_OFFICE_API_KEY` in either:
+For the personal Telegram-first mode, API key auth is disabled by default:
+
+```text
+AI_OFFICE_REQUIRE_API_KEY=false
+```
+
+This keeps local checks and the web dashboard frictionless. For a public server,
+set `AI_OFFICE_REQUIRE_API_KEY=true` and provide `AI_OFFICE_API_KEY`; then
+autonomous endpoints accept either:
 
 ```text
 X-API-Key: <value>

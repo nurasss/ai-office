@@ -21,8 +21,14 @@ async def require_api_key(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> None:
-    """Require AI_OFFICE_API_KEY via X-API-Key or Authorization: Bearer."""
-    expected = get_settings().ai_office_api_key.strip()
+    """Optionally require AI_OFFICE_API_KEY for public API deployments."""
+    settings = get_settings()
+    if not settings.ai_office_require_api_key:
+        request.state.api_authenticated = True
+        request.state.api_auth_mode = "disabled"
+        return
+
+    expected = settings.ai_office_api_key.strip()
     if not expected:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -37,9 +43,9 @@ async def require_api_key(
         )
 
     request.state.api_authenticated = True
+    request.state.api_auth_mode = "api_key"
 
 
 def parse_id_allowlist(raw_value: str) -> set[str]:
     """Parse comma-separated Telegram ids into strings."""
     return {item.strip() for item in raw_value.split(",") if item.strip()}
-

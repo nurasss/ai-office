@@ -20,7 +20,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Заполнить AI_OFFICE_API_KEY, TELEGRAM_WEBHOOK_SECRET, whitelist и LLM keys
+# Заполнить Telegram webhook secret, whitelist и LLM keys
 alembic upgrade head
 python run.py
 ```
@@ -29,12 +29,23 @@ python run.py
 
 ```bash
 curl http://localhost:8000/health
-curl -H "X-API-Key: <AI_OFFICE_API_KEY>" http://localhost:8000/api/autonomous/status
+curl http://localhost:8000/api/autonomous/status
 ```
 
 ## Агенты
 
 PMO, Developer, DataAnalyst, Copywriter, Support, Strategist и Accountant. Модели берутся из `config/settings.yaml` и env, поэтому код не привязан жестко к одному провайдеру.
+
+Агенты могут получать read-only публичный web-контекст для актуальных задач
+(`latest`, `сегодня`, новости, цены, docs, release notes, рынок, законы), если
+включено:
+
+```text
+AI_OFFICE_WEB_ACCESS_ENABLED=true
+```
+
+Web access не дает агентам право логиниться, отправлять формы, покупать,
+деплоить или делать write-действия. Это только поиск/чтение публичных страниц.
 
 ## Структура проекта
 
@@ -81,21 +92,22 @@ python3 scripts/smoke_first_task.py --route-only
 
 ## Product API
 
-Product API защищен `AI_OFFICE_API_KEY`:
+В личном режиме `AI_OFFICE_REQUIRE_API_KEY=false`, поэтому `X-API-Key` не нужен:
 
 ```bash
 curl -X POST http://localhost:8000/api/office/tasks \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <AI_OFFICE_API_KEY>" \
   -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","agent_id":"pmo"}'
 ```
+
+Для публичного сервера можно включить `AI_OFFICE_REQUIRE_API_KEY=true` и
+передавать `X-API-Key: <AI_OFFICE_API_KEY>`.
 
 Проверить только маршрут и RAG без LLM-вызова:
 
 ```bash
 curl -X POST http://localhost:8000/api/office/tasks \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <AI_OFFICE_API_KEY>" \
   -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","route_only":true}'
 ```
 
@@ -119,11 +131,11 @@ alembic upgrade head
 Основные endpoints:
 
 ```bash
-curl -H "X-API-Key: <AI_OFFICE_API_KEY>" http://localhost:8000/api/projects
-curl -X POST -H "X-API-Key: <AI_OFFICE_API_KEY>" -H "Content-Type: application/json" \
+curl http://localhost:8000/api/projects
+curl -X POST -H "Content-Type: application/json" \
   http://localhost:8000/api/projects \
   -d '{"slug":"ai-office","name":"AI Office","goal":"24/7 autonomous core"}'
-curl -X POST -H "X-API-Key: <AI_OFFICE_API_KEY>" http://localhost:8000/api/autonomy/daily-plan
+curl -X POST http://localhost:8000/api/autonomy/daily-plan
 ```
 
 Telegram-команды: `/tasks`, `/tasks today`, `/projects`, `/project ai-office`, `/plan`, `/approve <id>`, `/reject <id>`, `/autonomy status`, `/autonomy on`, `/autonomy off`.

@@ -10,13 +10,14 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
-from core.config import load_agent_config
+from core.config import get_settings, load_agent_config
 from core.llm_router import AgentConfig, LLMRouter
 from core.logger import get_logger
 from memory import LongTermMemoryStore, format_memory_context
 from rag.knowledge_files import format_knowledge_file_context, search_knowledge_files
 from rag.namespaces import get_agent_profile
 from rag.retriever import Retriever
+from tools.external.web_tools import build_web_context, fetch_web_page, web_search
 
 logger = get_logger("agents.base")
 
@@ -45,7 +46,7 @@ class BaseAgent(ABC):
 
         self.agent_id = self.AGENT_ID
         self.router = router or LLMRouter()
-        self.tools = tools or []
+        self.tools = self._with_default_tools(tools or [])
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.system_prompt = self._load_prompt()
@@ -73,6 +74,15 @@ class BaseAgent(ABC):
             data = yaml.safe_load(f)
 
         return data.get("system_prompt", "")
+
+    def _with_default_tools(self, tools: list[BaseTool]) -> list[BaseTool]:
+        """Attach safe read-only tools available to every agent."""
+        if not get_settings().ai_office_web_access_enabled:
+            return tools
+        by_name = {tool.name: tool for tool in tools}
+        for tool_item in (web_search, fetch_web_page):
+            by_name.setdefault(tool_item.name, tool_item)
+        return list(by_name.values())
 
     def get_model(
         self,
@@ -350,6 +360,18 @@ class BaseAgent(ABC):
         memory_context = format_memory_context(memory_events)
         if memory_context:
             blocks.append(memory_context)
+
+        try:
+            web_context = await build_web_context(task)
+        except Exception as error:
+            logger.warning(
+                "agent.web_context.failed",
+                agent_id=self.agent_id,
+                error=str(error),
+            )
+            web_context = ""
+        if web_context:
+            blocks.append(web_context)
 
         return "\n\n".join(blocks)
 

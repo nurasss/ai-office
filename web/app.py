@@ -10,7 +10,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from agents import (
@@ -41,7 +41,11 @@ from services.autonomy_service import AutonomyService, get_autonomy_enabled, set
 from services.project_service import ProjectService
 from services.scheduler import autonomy_scheduler
 from services.task_service import TaskService
-from tools.external.telegram import send_telegram_message, send_telegram_message_to
+from tools.external.telegram import (
+    send_telegram_message,
+    send_telegram_message_to,
+    telegram_runtime_configured,
+)
 
 load_dotenv()
 setup_logging("INFO")
@@ -1230,13 +1234,7 @@ async def health():
     """Health check для хостинга и load balancer."""
     settings = get_settings()
     database_ok = database_connected()
-    telegram_configured = bool(
-        settings.telegram_bot_token.strip()
-        and settings.telegram_chat_id.strip()
-        and settings.telegram_webhook_secret.strip()
-        and settings.allowed_telegram_user_ids.strip()
-        and settings.allowed_telegram_chat_ids.strip()
-    )
+    telegram_configured = telegram_runtime_configured()
     return {
         "status": "ok" if database_ok else "degraded",
         "database": database_ok,
@@ -1252,44 +1250,148 @@ async def health():
 
 
 # ── Главная страница ─────────────────────────────────────────────────
+def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dict[str, object]:
+    """Collect a small read-only dashboard snapshot without exposing secrets."""
+    database_ok = database_connected()
+    telegram_configured = telegram_runtime_configured()
+    agent_status_map = {
+        str(item.get("agent_id") or item.get("id")): item
+        for item in get_agent_statuses()
+    }
+    agents = []
+    for agent in agents_list:
+        status = agent_status_map.get(agent["id"], {})
+        agents.append({
+            **agent,
+            "status": str(status.get("status") or "idle"),
+            "message": str(status.get("message") or "Свободен"),
+            "task_id": str(status.get("task_id") or ""),
+        })
+
+    task_counts: dict[str, int] = {}
+    approval_counts: dict[str, int] = {}
+    projects: list[dict[str, object]] = []
+    open_tasks: list[dict[str, object]] = []
+    pending_approvals: list[dict[str, object]] = []
+    db_error = ""
+
+    if database_ok:
+        try:
+            with get_session() as db:
+                task_service = TaskService(db)
+                approval_service = ApprovalService(db)
+                project_service = ProjectService(db)
+                task_counts = task_service.count_by_status()
+                approval_counts = approval_service.count_by_status()
+                projects = [
+                    {
+                        "slug": project.slug,
+                        "name": project.name,
+                        "status": project.status,
+                        "priority": project.priority,
+                        "goal": project.goal,
+                    }
+                    for project in project_service.list_projects()[:8]
+                ]
+                open_tasks = [
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "status": task.status,
+                        "priority": task.priority,
+                        "assigned_agent": task.assigned_agent,
+                        "project": task.project.slug if task.project else "none",
+                        "requires_approval": task.requires_approval,
+                    }
+                    for task in task_service.list_tasks(open_only=True)[:12]
+                ]
+                pending_approvals = [
+                    {
+                        "id": approval.id,
+                        "action_type": approval.action_type,
+                        "summary": approval.summary,
+                        "task_id": approval.task_id,
+                        "requested_by_agent": approval.requested_by_agent,
+                    }
+                    for approval in approval_service.list_approvals(status="pending")[:8]
+                ]
+        except Exception as error:
+            db_error = format_error(error)
+
+    for status in ["planned", "queued", "running", "waiting_approval", "completed", "failed", "cancelled", "stuck"]:
+        task_counts.setdefault(status, 0)
+    approval_counts.setdefault("pending", 0)
+
+    telegram_commands = [
+        "/tasks",
+        "/tasks today",
+        "/plan",
+        "/projects",
+        "/project ai-office",
+        "/approve <id>",
+        "/reject <id>",
+        "/autonomy status",
+    ]
+
+    return {
+        "agents": agents,
+        "database_ok": database_ok,
+        "database_error": db_error,
+        "telegram_configured": telegram_configured,
+        "autonomy_enabled": get_autonomy_enabled(),
+        "scheduler_running": autonomy_scheduler.running,
+        "task_counts": task_counts,
+        "approval_counts": approval_counts,
+        "projects": projects,
+        "open_tasks": open_tasks,
+        "pending_approvals": pending_approvals,
+        "telegram_commands": telegram_commands,
+        "poll_interval_seconds": settings.autonomy_poll_interval_seconds,
+        "daily_plan_hour": settings.autonomy_daily_plan_hour,
+        "evening_review_hour": settings.autonomy_evening_review_hour,
+        "timezone": settings.autonomy_timezone,
+        "last_daily_plan_run_at": autonomy_scheduler.last_daily_plan_run_at or "never",
+        "last_evening_review_run_at": autonomy_scheduler.last_evening_review_run_at or "never",
+        "last_poll_run_at": autonomy_scheduler.last_poll_run_at or "never",
+        "model_keys": {
+            "OpenAI": bool(settings.openai_api_key.strip()),
+            "Anthropic": bool(settings.anthropic_api_key.strip()),
+            "Google": bool(settings.google_api_key.strip()),
+        },
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Главная страница с чатом."""
+    """Read-only operating dashboard. Agent work stays in Telegram/API."""
     agents_list = [
-        {"id": "pmo", "name": "PMO", "icon": "📋", "desc": "Оркестратор задач"},
-        {"id": "data_analyst", "name": "Аналитик", "icon": "📊", "desc": "Данные и метрики"},
-        {"id": "developer", "name": "Разработчик", "icon": "💻", "desc": "Код и ревью"},
-        {"id": "copywriter", "name": "Копирайтер", "icon": "✍️", "desc": "Контент"},
-        {"id": "support", "name": "Поддержка", "icon": "🎧", "desc": "Техподдержка"},
-        {"id": "strategist", "name": "Стратег", "icon": "🎯", "desc": "Анализ рынка"},
-        {"id": "accountant", "name": "Бухгалтер", "icon": "🧮", "desc": "Финансы"},
+        {"id": "pmo", "name": "PMO", "role": "Оркестратор задач"},
+        {"id": "data_analyst", "name": "Аналитик", "role": "Данные и метрики"},
+        {"id": "developer", "name": "Разработчик", "role": "Код и ревью"},
+        {"id": "copywriter", "name": "Копирайтер", "role": "Контент и документы"},
+        {"id": "support", "name": "Поддержка", "role": "Тикеты и FAQ"},
+        {"id": "strategist", "name": "Стратег", "role": "Рынок и roadmap"},
+        {"id": "accountant", "name": "Бухгалтер", "role": "Финансы и документы"},
     ]
-    conversations = chat_store.list_conversations()
+    settings = get_settings()
+    dashboard = _build_dashboard_context(agents_list, settings)
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"agents": agents_list, "conversations": conversations},
+        context=dashboard,
     )
 
 
 @app.get("/simulator", response_class=HTMLResponse)
 async def simulator(request: Request):
-    """Интерактивная демонстрация цикла LangGraph."""
-    return templates.TemplateResponse(
-        request=request,
-        name="simulator.html",
-        context={},
-    )
+    """Deprecated old demo UI; the web surface is now the operations dashboard."""
+    return RedirectResponse(url="/", status_code=307)
 
 
 @app.get("/pixel-office", response_class=HTMLResponse)
 async def pixel_office(request: Request):
-    """Pixel-art live view for AI Office agents."""
-    return templates.TemplateResponse(
-        request=request,
-        name="pixel_office.html",
-        context={},
-    )
+    """Deprecated old demo UI; the web surface is now the operations dashboard."""
+    return RedirectResponse(url="/", status_code=307)
 
 
 @app.get("/api/agent-events")
