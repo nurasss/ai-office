@@ -480,6 +480,46 @@ def _telegram_access_error(update: dict[str, object]) -> tuple[int, str] | None:
     return None
 
 
+async def _notify_telegram_access_error(
+    update: dict[str, object],
+    *,
+    agent_id: str,
+    reason: str,
+) -> None:
+    """Tell the chat why an update was ignored without exposing secrets."""
+    message = _extract_telegram_message(update)
+    callback_query = _extract_telegram_callback_query(update)
+    if callback_query and not message:
+        callback_message = callback_query.get("message")
+        message = callback_message if isinstance(callback_message, dict) else None
+        sender = callback_query.get("from")
+    else:
+        sender = message.get("from") if isinstance(message, dict) else None
+
+    if not isinstance(message, dict):
+        return
+    chat = message.get("chat")
+    if not isinstance(chat, dict) or chat.get("id") is None:
+        return
+
+    user_id = sender.get("id") if isinstance(sender, dict) else "unknown"
+    chat_id = chat.get("id")
+    thread_id = _telegram_message_thread_id(message)
+    try:
+        await send_telegram_message_to(
+            chat_id,
+            "AI Office ignored this message: access is not allowed.\n"
+            f"Reason: {reason}\n"
+            f"Your Telegram user_id: {user_id}\n"
+            f"Chat id: {chat_id}\n"
+            "Add this user_id to ALLOWED_TELEGRAM_USER_IDS.",
+            agent_id=agent_id,
+            message_thread_id=thread_id,
+        )
+    except Exception as error:
+        logger.warning("telegram.access_notice.failed", reason=reason, error=format_error(error))
+
+
 def _normalize_telegram_command(text: str) -> tuple[str | None, str]:
     """Parse Telegram slash commands while ignoring an optional bot username."""
     stripped = text.strip()
@@ -1542,6 +1582,7 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     if access_error:
         _, message = access_error
         logger.warning("telegram.update.ignored", reason=message)
+        await _notify_telegram_access_error(update, agent_id="pmo", reason=message)
         return JSONResponse({"status": "ignored", "reason": message})
     background_tasks.add_task(process_telegram_update, update)
     return JSONResponse({"status": "accepted"})
@@ -1570,6 +1611,7 @@ async def telegram_agent_webhook(
     if access_error:
         _, message = access_error
         logger.warning("telegram.update.ignored", reason=message, agent_id=agent_id)
+        await _notify_telegram_access_error(update, agent_id=agent_id, reason=message)
         return JSONResponse({"status": "ignored", "reason": message, "agent_id": agent_id})
     background_tasks.add_task(
         process_telegram_update,
