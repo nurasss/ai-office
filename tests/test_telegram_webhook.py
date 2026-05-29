@@ -434,7 +434,8 @@ def test_inline_callback_rejects_unauthorized_user(monkeypatch):
         headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
 
 
 def test_inline_callback_cannot_approve_expired_approval(tmp_path, monkeypatch):
@@ -550,7 +551,8 @@ def test_telegram_webhook_rejects_wrong_user(monkeypatch):
         headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
 
 
 def test_parse_telegram_agent_commands():

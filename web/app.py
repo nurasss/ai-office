@@ -1540,8 +1540,9 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     update = await request.json()
     access_error = _telegram_access_error(update)
     if access_error:
-        status_code, message = access_error
-        return JSONResponse({"error": message}, status_code=status_code)
+        _, message = access_error
+        logger.warning("telegram.update.ignored", reason=message)
+        return JSONResponse({"status": "ignored", "reason": message})
     background_tasks.add_task(process_telegram_update, update)
     return JSONResponse({"status": "accepted"})
 
@@ -1567,8 +1568,9 @@ async def telegram_agent_webhook(
     update = await request.json()
     access_error = _telegram_access_error(update)
     if access_error:
-        status_code, message = access_error
-        return JSONResponse({"error": message}, status_code=status_code)
+        _, message = access_error
+        logger.warning("telegram.update.ignored", reason=message, agent_id=agent_id)
+        return JSONResponse({"status": "ignored", "reason": message, "agent_id": agent_id})
     background_tasks.add_task(
         process_telegram_update,
         update,
