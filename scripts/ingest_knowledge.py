@@ -1,9 +1,9 @@
 """Load agent-specific knowledge files into the configured vector store.
 
 Examples:
-    python scripts/ingest_knowledge.py --agent copywriter
-    python scripts/ingest_knowledge.py --agent all --include-common
-    python scripts/ingest_knowledge.py --agent pmo --dry-run
+    python3 scripts/ingest_knowledge.py --agent copywriter
+    python3 scripts/ingest_knowledge.py --agent all --include-common
+    python3 scripts/ingest_knowledge.py --agent pmo --dry-run
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from core.config import load_agent_config
 from rag.namespaces import COMMON_NAMESPACE, all_agent_namespaces, get_agent_profile
 from rag.retriever import Retriever
 
-SUPPORTED_TEXT_FORMATS = {".md", ".txt", ".yaml", ".yml", ".json", ".csv"}
+SUPPORTED_TEXT_FORMATS = {".md", ".txt", ".yaml", ".yml", ".json", ".csv", ".sql"}
 
 
 def parse_args() -> argparse.Namespace:

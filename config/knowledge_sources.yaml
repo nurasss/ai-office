@@ -29,6 +29,10 @@ common:
       title: "Общие регламенты бизнес-процессов"
       path: knowledge/common/business_processes/
       formats: [md, txt, pdf]
+    - id: corporate_tone_of_voice
+      title: "Общий tone of voice компании"
+      path: knowledge/common/tone_of_voice/
+      formats: [md, txt, pdf]
 
 agents:
   pmo:
@@ -44,6 +48,14 @@ agents:
         title: "Регламенты бизнес-процессов"
         path: knowledge/pmo/process_regulations/
         formats: [md, txt, pdf]
+      - id: sla_rules
+        title: "SLA и правила контроля сроков"
+        path: knowledge/pmo/sla/
+        formats: [md, txt, yaml, csv]
+      - id: task_tracker_rules
+        title: "Правила Jira/Trello и статусы workflow"
+        path: knowledge/pmo/task_tracker_rules/
+        formats: [md, txt, yaml]
       - id: routing_rules
         title: "Карта ответственности агентов"
         path: knowledge/pmo/routing_rules/
@@ -74,6 +86,10 @@ agents:
         title: "Глоссарий терминов и названий продуктов"
         path: knowledge/copywriter/glossary/
         formats: [md, txt, yaml]
+      - id: pr_templates
+        title: "PR-шаблоны и форматы публичных объявлений"
+        path: knowledge/copywriter/pr_templates/
+        formats: [md, txt]
 
   developer:
     namespace: agent_developer
@@ -114,6 +130,10 @@ agents:
         title: "Руководства пользователя"
         path: knowledge/support/user_manuals/
         formats: [md, txt, pdf]
+      - id: troubleshooting_guides
+        title: "Troubleshooting guides и деревья диагностики"
+        path: knowledge/support/troubleshooting_guides/
+        formats: [md, txt, yaml]
       - id: escalation_rules
         title: "Регламенты L1/L2 эскалации"
         path: knowledge/support/escalation_rules/
@@ -135,6 +155,10 @@ agents:
         title: "Формулы расчета CAC, LTV и других KPI"
         path: knowledge/data_analyst/kpi_formulas/
         formats: [md, txt, yaml]
+      - id: sql_patterns
+        title: "Проверенные SQL-паттерны и правила запросов"
+        path: knowledge/data_analyst/sql_patterns/
+        formats: [md, txt, sql]
       - id: analytics_reports
         title: "Примеры успешных отчетов и дашбордов"
         path: knowledge/data_analyst/report_examples/
@@ -157,10 +181,22 @@ agents:
         title: "Внутренняя учетная политика"
         path: knowledge/accountant/accounting_policy/
         formats: [md, txt, pdf]
+      - id: expense_policy
+        title: "Политика командировок и расходов"
+        path: knowledge/accountant/expense_policy/
+        formats: [md, txt, pdf, yaml]
+      - id: legal_entities
+        title: "Реквизиты юрлиц, БИН/ИИН и расчетные счета"
+        path: knowledge/accountant/legal_entities/
+        formats: [md, txt, yaml, csv]
       - id: tax_reference
         title: "Справочники налоговых ставок и лимитов"
         path: knowledge/accountant/tax_reference/
         formats: [md, txt, yaml]
+      - id: chart_of_accounts
+        title: "План счетов компании"
+        path: knowledge/accountant/chart_of_accounts/
+        formats: [md, txt, yaml, csv]
       - id: approval_matrix
         title: "Матрица согласования сумм"
         path: knowledge/accountant/approval_matrix/
@@ -175,6 +211,10 @@ agents:
         title: "Стратегические цели и OKR на год/квартал"
         path: knowledge/strategist/okrs/
         formats: [md, txt, yaml]
+      - id: roadmaps
+        title: "Долгосрочные продуктовые roadmap-ы"
+        path: knowledge/strategist/roadmaps/
+        formats: [md, txt, yaml, csv]
       - id: market_research
         title: "Исследования рынка и отраслевые отчеты"
         path: knowledge/strategist/market_research/

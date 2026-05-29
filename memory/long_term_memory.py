@@ -79,7 +79,15 @@ class LongTermMemoryStore:
             "shared_incident_namespace",
             "common_incidents",
         )
-        self.storage_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.storage_path.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            self.enabled = False
+            logger.warning(
+                "memory.disabled_read_only",
+                path=str(self.storage_path),
+                error=str(error),
+            )
 
     def append(self, event: MemoryEvent) -> None:
         """Append a memory event to its agent-specific JSONL file."""

@@ -9,6 +9,7 @@ from langchain_core.tools import BaseTool
 from agents.base.base_agent import BaseAgent
 from core.logger import get_logger
 from core.state import AgentRole, OfficeState, SubTask, TaskStatus
+from services.pmo_planner import PMOPlanningService
 from tools.external.github import read_github_repo
 from tools.external.jira import search_jira_issues
 from tools.external.slack import send_slack_message
@@ -34,6 +35,33 @@ class PMOAgent(BaseAgent):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(tools=PMO_TOOLS, **kwargs)
+
+    async def plan_goal(self, goal: str, project_slug: str | None = None) -> dict[str, Any]:
+        """Return a structured project/task plan, falling back safely without LLM."""
+        planner = PMOPlanningService()
+        prompt = (
+            "Верни только JSON по схеме: "
+            '{"project_slug":"ai-office","goal":"...","tasks":[{"title":"...",'
+            '"description":"...","assigned_agent":"developer","priority":2,'
+            '"requires_approval":false,"base_agent":"developer",'
+            '"profile_id":"developer.backend_architect","profile_name":"Backend Architect"}]}.\n\n'
+            f"Project slug hint: {project_slug or ''}\n"
+            f"Goal:\n{goal}"
+        )
+        try:
+            llm_text = await self.process_task(
+                prompt,
+                use_tools=False,
+                max_tokens=1400,
+            )
+            return planner.plan_from_text(
+                goal=goal,
+                project_slug=project_slug,
+                llm_text=llm_text,
+            ).model_dump()
+        except Exception as error:
+            logger.warning("pmo.structured_plan.fallback", error=str(error))
+            return planner.fallback_plan(goal=goal, project_slug=project_slug).model_dump()
 
     def _decompose_task(self, task: str) -> list[SubTask]:
         """Декомпозировать задачу на подзадачи через LLM.

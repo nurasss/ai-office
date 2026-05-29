@@ -1,6 +1,12 @@
-# ─── Environment ──────────────────────────────────────────────────────
+# ─── Environment / secrets ────────────────────────────────────────────
 .env
+.env.*
+!.env.example
 *.env.local
+*.env.secret
+*.env.prod
+*.pem
+*.key
 
 # ─── Python ───────────────────────────────────────────────────────────
 __pycache__/
@@ -10,6 +16,9 @@ __pycache__/
 dist/
 build/
 .eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # ─── Virtual env ──────────────────────────────────────────────────────
 .venv/
@@ -24,8 +33,15 @@ venv/
 .DS_Store
 Thumbs.db
 
-# ─── Data / runtime ───────────────────────────────────────────────────
-*.db
-*.sqlite3
+# ─── Local platforms / runtime data ───────────────────────────────────
+.vercel/
 data/
+reports/
+workspaces/
+*.db
+*.sqlite
+*.sqlite3
+reports.pdf
+reports/
 .vercel
+reports/
