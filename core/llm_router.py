@@ -44,6 +44,13 @@ class MissingLLMCredentialsError(RuntimeError):
         )
 
 
+def _openai_supports_custom_temperature(model_name: str) -> bool:
+    """Return whether the OpenAI chat model accepts non-default temperature."""
+    normalized = model_name.strip().lower()
+    fixed_temperature_prefixes = ("gpt-5", "o1", "o3", "o4")
+    return not normalized.startswith(fixed_temperature_prefixes)
+
+
 # ─── Конфигурация пулов по агентам ────────────────────────────────────
 AGENT_MODEL_POOLS: dict[str, ModelPool] = {
     "pmo": ModelPool(
@@ -200,13 +207,15 @@ class LLMRouter:
                 max_tokens=effective_max_tokens,
             )
         elif pool.provider == Provider.OPENAI:
-            model = ChatOpenAI(
-                model=model_name,
-                api_key=api_key,
-                temperature=effective_temperature,
-                max_tokens=effective_max_tokens,
-                max_retries=1,
-            )
+            openai_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "api_key": api_key,
+                "max_tokens": effective_max_tokens,
+                "max_retries": 1,
+            }
+            if _openai_supports_custom_temperature(model_name):
+                openai_kwargs["temperature"] = effective_temperature
+            model = ChatOpenAI(**openai_kwargs)
         elif pool.provider == Provider.GOOGLE:
             from langchain_google_genai import ChatGoogleGenerativeAI
 
