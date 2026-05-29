@@ -173,6 +173,7 @@ class Settings(BaseSettings):
     ai_office_web_fetch_max_chars: int = Field(
         default=6000, validation_alias="AI_OFFICE_WEB_FETCH_MAX_CHARS"
     )
+    brave_search_api_key: str = Field(default="", validation_alias="BRAVE_SEARCH_API_KEY")
 
     @field_validator("log_level")
     @classmethod

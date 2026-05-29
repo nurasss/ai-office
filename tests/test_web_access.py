@@ -58,6 +58,38 @@ async def test_search_public_web_parses_results(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_public_web_uses_brave_when_configured(monkeypatch):
+    monkeypatch.setenv("AI_OFFICE_WEB_ACCESS_ENABLED", "true")
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+    get_settings.cache_clear()
+
+    payload = {
+        "web": {
+            "results": [
+                {
+                    "title": "Market News",
+                    "url": "https://example.com/market",
+                    "description": "Fresh market update.",
+                }
+            ]
+        }
+    }
+
+    monkeypatch.setattr(web_tools, "_is_safe_public_url", lambda url: True)
+    monkeypatch.setattr(web_tools.asyncio, "to_thread", lambda func: web_tools.asyncio.sleep(0, result='{"web":{"results":[{"title":"Market News","url":"https://example.com/market","description":"Fresh market update."}]}}'))
+
+    results = await search_public_web("market news", max_results=3)
+
+    assert results == [
+        {
+            "title": "Market News",
+            "url": "https://example.com/market",
+            "snippet": "Fresh market update.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_build_web_context_uses_search_for_latest_tasks(monkeypatch):
     monkeypatch.setenv("AI_OFFICE_WEB_ACCESS_ENABLED", "true")
     get_settings.cache_clear()

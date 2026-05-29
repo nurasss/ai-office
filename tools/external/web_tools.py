@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import ipaddress
+import json
 import re
 import socket
 import urllib.parse
@@ -20,6 +21,7 @@ from core.logger import get_logger
 logger = get_logger("tools.web")
 
 SEARCH_URL = "https://duckduckgo.com/html/"
+BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 USER_AGENT = "AI-Office/1.0 read-only research"
 BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
@@ -152,6 +154,10 @@ async def search_public_web(query: str, *, max_results: int | None = None) -> li
     if not query:
         return []
 
+    brave_results = await _search_brave(query, limit=limit)
+    if brave_results:
+        return brave_results
+
     search_url = f"{SEARCH_URL}?{urllib.parse.urlencode({'q': query})}"
     try:
         html_text = await asyncio.to_thread(_read_url, search_url)
@@ -169,6 +175,47 @@ async def search_public_web(query: str, *, max_results: int | None = None) -> li
             continue
         seen.add(url)
         results.append(result)
+        if len(results) >= limit:
+            break
+    return results
+
+
+async def _search_brave(query: str, *, limit: int) -> list[dict[str, str]]:
+    """Search through Brave when BRAVE_SEARCH_API_KEY is configured."""
+    api_key = get_settings().brave_search_api_key.strip()
+    if not api_key:
+        return []
+
+    url = f"{BRAVE_SEARCH_URL}?{urllib.parse.urlencode({'q': query, 'count': str(limit)})}"
+
+    def read() -> str:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "X-Subscription-Token": api_key,
+                "User-Agent": USER_AGENT,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.read(800_000).decode("utf-8", errors="replace")
+
+    try:
+        payload = json.loads(await asyncio.to_thread(read))
+    except Exception as error:
+        logger.warning("web.brave_search.failed", error=str(error))
+        return []
+
+    results: list[dict[str, str]] = []
+    for item in payload.get("web", {}).get("results", []):
+        url_value = str(item.get("url") or "")
+        if not url_value or not _is_safe_public_url(url_value):
+            continue
+        results.append({
+            "title": _clean_text(str(item.get("title") or "Untitled")),
+            "url": url_value,
+            "snippet": _clean_text(str(item.get("description") or "")),
+        })
         if len(results) >= limit:
             break
     return results
@@ -210,7 +257,8 @@ async def build_web_context(task: str, *, max_results: int = 3) -> str:
         )
     lines.append(
         "Используй этот контекст как свежие публичные сигналы. "
-        "Если нужно точное подтверждение, укажи ссылку и что надо проверить."
+        "Не говори, что у тебя нет доступа к интернету, если этот блок содержит результаты. "
+        "В ответе укажи источники URL из этого блока."
     )
     return "\n".join(lines)
 
