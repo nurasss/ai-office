@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
 
 import web.app as web_app
-from core.chat_history import ChatHistoryStore
+from core.chat_history import ChatHistoryStore, ChatMessage, utc_now_iso
 from core.config import get_settings
+from core.db import init_db, reset_db_engine
 
 
 class FakeAgent:
@@ -113,3 +114,37 @@ def test_second_message_receives_previous_chat_history(tmp_path, monkeypatch):
     assert history[0]["role"] == "user"
     assert history[0]["text"] == "Первый вопрос"
     assert history[1]["role"] == "assistant"
+
+
+def test_default_chat_history_store_persists_to_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'chat.db'}")
+    get_settings.cache_clear()
+    reset_db_engine()
+    init_db()
+
+    first_store = ChatHistoryStore()
+    first_store.create_conversation(
+        agent_id="pmo",
+        title="Telegram",
+        conversation_id="telegram_123",
+    )
+    first_store.append_message(
+        "telegram_123",
+        ChatMessage(role="user", text="Новости IT", created_at=utc_now_iso()),
+    )
+    first_store.append_message(
+        "telegram_123",
+        ChatMessage(
+            role="assistant",
+            text="Вот краткий обзор IT-новостей.",
+            created_at=utc_now_iso(),
+            handled_by="strategist",
+        ),
+    )
+
+    second_store = ChatHistoryStore()
+    context = second_store.recent_context("telegram_123", limit=12)
+
+    assert [item["role"] for item in context] == ["user", "assistant"]
+    assert context[1]["text"] == "Вот краткий обзор IT-новостей."
+    assert context[1]["handled_by"] == "strategist"
