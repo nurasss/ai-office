@@ -73,6 +73,6 @@ Approval requests also include inline buttons:
 ❌ Reject
 ```
 
-Callback data uses `approval:approve:<id>` and `approval:reject:<id>`. The callback user and chat must pass the same whitelist checks as normal messages. Expired or already resolved approvals cannot be approved again.
+Callback data uses `approval:approve:<id>` and `approval:reject:<id>`. The callback user must pass the Telegram user whitelist; chat whitelist is also enforced when `ALLOWED_TELEGRAM_CHAT_IDS` is set. Expired or already resolved approvals cannot be approved again.
 
 `/autonomy status` shows scheduler state, task counts, pending/expired approvals, last daily/evening run timestamps, and DB connectivity.

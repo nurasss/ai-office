@@ -555,6 +555,30 @@ def test_telegram_webhook_rejects_wrong_user(monkeypatch):
     assert response.json()["status"] == "ignored"
 
 
+def test_telegram_webhook_allows_any_chat_when_chat_whitelist_empty(monkeypatch):
+    class UserOnlySettings(FakeSettings):
+        allowed_telegram_chat_ids = ""
+
+    sent_messages: list[dict[str, object]] = []
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append({"chat_id": chat_id, "text": text, **kwargs})
+        return True
+
+    monkeypatch.setattr(web_app, "get_settings", lambda: UserOnlySettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+    client = TestClient(web_app.app)
+    response = client.post(
+        "/api/telegram/webhook",
+        json=telegram_update("/help", chat_id=-100987654321),
+        headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert sent_messages
+
+
 def test_parse_telegram_agent_commands():
     assert web_app._parse_telegram_agent_command("pmo", "задача") == ("pmo", "задача", False)
     assert web_app._parse_telegram_agent_command("all", "задача") == ("pmo", "задача", True)

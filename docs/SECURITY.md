@@ -66,7 +66,7 @@ Webhook requests must include:
 X-Telegram-Bot-Api-Secret-Token: <TELEGRAM_WEBHOOK_SECRET>
 ```
 
-Messages from non-whitelisted users or chats are rejected before any agent/task work starts.
+Messages from non-whitelisted users are rejected before any agent/task work starts. `ALLOWED_TELEGRAM_CHAT_IDS` is optional for personal Telegram groups; set it only when you want to lock the bot to specific chat IDs.
 
 Inline approval callbacks use the same whitelist checks. Pending approvals can expire through `AI_OFFICE_APPROVAL_TTL_HOURS`; expired or already resolved approvals cannot be approved later.
 

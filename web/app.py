@@ -449,7 +449,7 @@ def _telegram_access_error(update: dict[str, object]) -> tuple[int, str] | None:
     allowed_chats = parse_id_allowlist(
         str(getattr(settings, "allowed_telegram_chat_ids", ""))
     )
-    if not allowed_users or not allowed_chats:
+    if not allowed_users:
         return 503, "Telegram whitelist is not configured."
 
     callback_query = _extract_telegram_callback_query(update)
@@ -469,7 +469,7 @@ def _telegram_access_error(update: dict[str, object]) -> tuple[int, str] | None:
     chat = message.get("chat")
     if not isinstance(chat, dict) or chat.get("id") is None:
         return 403, "Telegram chat is not allowed."
-    if str(chat.get("id")) not in allowed_chats:
+    if allowed_chats and str(chat.get("id")) not in allowed_chats:
         return 403, "Telegram chat is not allowed."
 
     if not isinstance(sender, dict) or sender.get("id") is None:

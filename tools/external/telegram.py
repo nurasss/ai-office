@@ -43,7 +43,6 @@ def telegram_runtime_configured() -> bool:
         and settings.telegram_chat_id.strip()
         and settings.telegram_webhook_secret.strip()
         and settings.allowed_telegram_user_ids.strip()
-        and settings.allowed_telegram_chat_ids.strip()
     )
 
 
