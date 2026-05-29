@@ -1,4 +1,7 @@
-from core.llm_router import _openai_supports_custom_temperature
+from core.llm_router import (
+    _openai_supports_custom_temperature,
+    _openai_temperature_for_model,
+)
 
 
 def test_openai_temperature_support_detection_for_gpt5_models():
@@ -6,3 +9,9 @@ def test_openai_temperature_support_detection_for_gpt5_models():
     assert _openai_supports_custom_temperature("gpt-5") is False
     assert _openai_supports_custom_temperature("o3-mini") is False
     assert _openai_supports_custom_temperature("gpt-4o-mini") is True
+
+
+def test_openai_temperature_is_default_for_fixed_temperature_models():
+    assert _openai_temperature_for_model("gpt-5.4", 0.7) == 1.0
+    assert _openai_temperature_for_model("o4-mini", 0.2) == 1.0
+    assert _openai_temperature_for_model("gpt-4o-mini", 0.3) == 0.3

@@ -51,6 +51,13 @@ def _openai_supports_custom_temperature(model_name: str) -> bool:
     return not normalized.startswith(fixed_temperature_prefixes)
 
 
+def _openai_temperature_for_model(model_name: str, requested_temperature: float) -> float:
+    """Return an OpenAI-compatible temperature for the selected model."""
+    if _openai_supports_custom_temperature(model_name):
+        return requested_temperature
+    return 1.0
+
+
 # ─── Конфигурация пулов по агентам ────────────────────────────────────
 AGENT_MODEL_POOLS: dict[str, ModelPool] = {
     "pmo": ModelPool(
@@ -212,9 +219,11 @@ class LLMRouter:
                 "api_key": api_key,
                 "max_tokens": effective_max_tokens,
                 "max_retries": 1,
+                "temperature": _openai_temperature_for_model(
+                    model_name,
+                    effective_temperature,
+                ),
             }
-            if _openai_supports_custom_temperature(model_name):
-                openai_kwargs["temperature"] = effective_temperature
             model = ChatOpenAI(**openai_kwargs)
         elif pool.provider == Provider.GOOGLE:
             from langchain_google_genai import ChatGoogleGenerativeAI
