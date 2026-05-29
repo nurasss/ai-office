@@ -95,11 +95,29 @@ AI_OFFICE_TASK_STUCK_TIMEOUT_MINUTES=30
 AI_OFFICE_TASK_MAX_RETRIES=2
 AI_OFFICE_APPROVAL_TTL_HOURS=24
 AUTONOMY_ENABLED=true
+CRON_SECRET=<long-random-secret>
 ENVIRONMENT=production
 LOG_LEVEL=INFO
 ```
 
 `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` нужны для уведомления после завершения PMO-задачи. Если они не заданы, чат продолжит работать, но уведомление будет пропущено.
+
+## 24/7 autonomy tick on Vercel Hobby
+
+Vercel Hobby не поддерживает частые Vercel Cron Jobs. Поэтому в репозитории есть
+GitHub Actions workflow `.github/workflows/autonomy-cron.yml`, который дергает
+защищенный endpoint каждые 15 минут:
+
+```text
+https://ai-office-one.vercel.app/api/cron/autonomy-tick
+```
+
+Для него нужны GitHub repository secrets:
+
+```text
+AI_OFFICE_CRON_URL=https://ai-office-one.vercel.app/api/cron/autonomy-tick
+AI_OFFICE_CRON_SECRET=<same value as Vercel CRON_SECRET>
+```
 
 ## Telegram chat / channel webhook
 
