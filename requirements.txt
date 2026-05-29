@@ -1,7 +1,7 @@
 # ─── Core orchestration ───────────────────────────────────────────────
 langgraph==0.2.74
 langchain==0.3.18
-langchain-core==0.3.31
+langchain-core==0.3.53
 
 # ─── LLM provider SDKs ───────────────────────────────────────────────
 langchain-anthropic==0.3.12
