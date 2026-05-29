@@ -112,6 +112,22 @@ async def test_build_web_context_uses_search_for_latest_tasks(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_web_context_reports_empty_search_without_claiming_no_access(monkeypatch):
+    monkeypatch.setenv("AI_OFFICE_WEB_ACCESS_ENABLED", "true")
+    get_settings.cache_clear()
+
+    async def fake_search(query: str, *, max_results: int | None = None):
+        return []
+
+    monkeypatch.setattr(web_tools, "search_public_web", fake_search)
+
+    context = await build_web_context("актуальные новости IT")
+
+    assert "поиск был выполнен" in context
+    assert "нет доступа к интернету" in context
+
+
+@pytest.mark.asyncio
 async def test_web_access_can_be_disabled(monkeypatch):
     monkeypatch.setenv("AI_OFFICE_WEB_ACCESS_ENABLED", "false")
     get_settings.cache_clear()

@@ -247,7 +247,12 @@ async def build_web_context(task: str, *, max_results: int = 3) -> str:
         return ""
     results = await search_public_web(task, max_results=max_results)
     if not results:
-        return ""
+        return (
+            "Актуальный публичный web-контекст (read-only search): "
+            "поиск был выполнен, но безопасные результаты не найдены. "
+            "Не говори, что у тебя нет доступа к интернету; скажи, что поиск не вернул источников, "
+            "и предложи уточнить запрос или проверить конкретные сайты."
+        )
     lines = ["Актуальный публичный web-контекст (read-only search):"]
     for index, result in enumerate(results, start=1):
         lines.append(
