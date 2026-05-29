@@ -436,6 +436,35 @@
                             {% endif %}
                         </div>
                     </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Последние задачи</h3>
+                            <span class="pill info">{{ recent_tasks|length }} на экране</span>
+                        </div>
+                        <div class="panel-body">
+                            {% if recent_tasks %}
+                            <div class="task-list">
+                                {% for task in recent_tasks %}
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#{{ task.id }} {{ task.title }}</div>
+                                            <div class="row-meta">{{ task.project }} · {{ task.assigned_agent }} · {{ task.updated_at }}</div>
+                                        </div>
+                                        <span class="pill {{ 'ok' if task.status == 'completed' else 'warn' if task.status in ['running', 'queued', 'waiting_approval'] else 'bad' if task.status in ['failed', 'stuck'] else 'info' }}">{{ task.status }}</span>
+                                    </div>
+                                    {% if task.result_summary %}
+                                    <div class="row-meta">{{ task.result_summary }}</div>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="empty">Telegram-задачи появятся здесь после первого сообщения агенту.</div>
+                            {% endif %}
+                        </div>
+                    </article>
                 </div>
 
                 <div class="grid">

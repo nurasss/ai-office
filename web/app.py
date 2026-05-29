@@ -35,6 +35,7 @@ from core.config import get_settings
 from core.db import database_connected, get_session, init_db
 from core.llm_router import MissingLLMCredentialsError
 from core.logger import get_logger, setup_logging
+from core.schemas import TaskCreate, TaskEventCreate
 from api.autonomous import router as autonomous_router
 from services.approval_service import ApprovalService, ApprovalStateError
 from services.autonomy_service import AutonomyService, get_autonomy_enabled, set_autonomy_enabled
@@ -261,6 +262,32 @@ async def run_agent_text_task(
         raise ValueError(f"Неизвестный агент: {agent_id}")
 
     task_id = f"web_{uuid.uuid4().hex[:8]}"
+    db_task_id: int | None = None
+    try:
+        init_db()
+        with get_session() as db:
+            task = TaskService(db).create_task(
+                TaskCreate(
+                    title=message.strip()[:180] or f"Telegram task for {agent_id}",
+                    description=message,
+                    created_by="user",
+                    assigned_agent=agent_id,
+                    status="running",
+                    priority=3,
+                )
+            )
+            db_task_id = task.id
+            TaskService(db).add_event(
+                task.id,
+                TaskEventCreate(
+                    event_type="telegram_task_started",
+                    message="Task received from Telegram/Web runtime.",
+                    metadata={"external_task_id": task_id, "agent_id": agent_id},
+                ),
+            )
+    except Exception as error:
+        logger.warning("task.persistence.start_failed", task_id=task_id, error=format_error(error))
+
     await publish_agent_status(
         agent_id,
         "thinking",
@@ -275,6 +302,20 @@ async def run_agent_text_task(
             max_tokens=2400,
         )
     except Exception:
+        if db_task_id is not None:
+            try:
+                with get_session() as db:
+                    TaskService(db).update_status(
+                        db_task_id,
+                        "failed",
+                        message=f"Agent failed for external task {task_id}.",
+                    )
+            except Exception as persist_error:
+                logger.warning(
+                    "task.persistence.fail_status_failed",
+                    task_id=task_id,
+                    error=format_error(persist_error),
+                )
         await publish_agent_status(
             agent_id,
             "error",
@@ -287,6 +328,20 @@ async def run_agent_text_task(
         raise
     response_text = str(response_text or "").strip()
     if not response_text:
+        if db_task_id is not None:
+            try:
+                with get_session() as db:
+                    TaskService(db).update_status(
+                        db_task_id,
+                        "failed",
+                        message=f"Empty model response for external task {task_id}.",
+                    )
+            except Exception as persist_error:
+                logger.warning(
+                    "task.persistence.empty_status_failed",
+                    task_id=task_id,
+                    error=format_error(persist_error),
+                )
         await publish_agent_status(
             agent_id,
             "error",
@@ -299,6 +354,18 @@ async def run_agent_text_task(
         raise RuntimeError(
             "Модель вернула пустой ответ. Попробуйте повторить запрос или проверить API-ключ модели."
         )
+
+    if db_task_id is not None:
+        try:
+            with get_session() as db:
+                TaskService(db).save_result(
+                    db_task_id,
+                    summary=response_text[:800],
+                    payload={"external_task_id": task_id, "agent_id": agent_id},
+                    status="completed",
+                )
+        except Exception as error:
+            logger.warning("task.persistence.result_failed", task_id=task_id, error=format_error(error))
 
     await publish_agent_status(
         agent_id,
@@ -1272,6 +1339,7 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
     approval_counts: dict[str, int] = {}
     projects: list[dict[str, object]] = []
     open_tasks: list[dict[str, object]] = []
+    recent_tasks: list[dict[str, object]] = []
     pending_approvals: list[dict[str, object]] = []
     db_error = ""
 
@@ -1304,6 +1372,19 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
                         "requires_approval": task.requires_approval,
                     }
                     for task in task_service.list_tasks(open_only=True)[:12]
+                ]
+                recent_tasks = [
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "status": task.status,
+                        "priority": task.priority,
+                        "assigned_agent": task.assigned_agent,
+                        "project": task.project.slug if task.project else "telegram",
+                        "updated_at": task.updated_at.strftime("%Y-%m-%d %H:%M"),
+                        "result_summary": (task.result_summary or "")[:220],
+                    }
+                    for task in task_service.list_tasks()[:12]
                 ]
                 pending_approvals = [
                     {
@@ -1344,6 +1425,7 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
         "approval_counts": approval_counts,
         "projects": projects,
         "open_tasks": open_tasks,
+        "recent_tasks": recent_tasks,
         "pending_approvals": pending_approvals,
         "telegram_commands": telegram_commands,
         "poll_interval_seconds": settings.autonomy_poll_interval_seconds,

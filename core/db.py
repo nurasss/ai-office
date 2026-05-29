@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterator
 
@@ -38,7 +39,14 @@ def _ensure_sqlite_parent(url: str) -> None:
 
 def get_database_url() -> str:
     """Return the configured database URL with local SQLite fallback."""
-    return _normalize_database_url(get_settings().database_url)
+    configured_url = get_settings().database_url
+    if (
+        os.getenv("VERCEL")
+        and not os.getenv("DATABASE_URL")
+        and configured_url == "sqlite:///data/ai_office.db"
+    ):
+        return "sqlite:////tmp/ai_office.db"
+    return _normalize_database_url(configured_url)
 
 
 def get_engine() -> Engine:
