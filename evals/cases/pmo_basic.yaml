@@ -1,0 +1,10 @@
+id: pmo_001
+agent: pmo
+input: "Разбей задачу запуска пилота на шаги"
+expected_contains:
+  - "план"
+  - "этап"
+forbidden_contains:
+  - "секрет"
+tool_expectation:
+  requires_approval: false

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import Header, HTTPException, Request, status
+from collections.abc import Callable
+
+from fastapi import Depends, Header, HTTPException, Request, status
 
 from core.config import get_settings
 
@@ -49,3 +51,64 @@ async def require_api_key(
 def parse_id_allowlist(raw_value: str) -> set[str]:
     """Parse comma-separated Telegram ids into strings."""
     return {item.strip() for item in raw_value.split(",") if item.strip()}
+
+
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "owner": {
+        "task:create",
+        "task:read",
+        "task:cancel",
+        "approval:read",
+        "approval:decide",
+        "audit:read",
+        "knowledge:upload",
+        "knowledge:read",
+        "integration:manage",
+        "cost:read",
+    },
+    "admin": {
+        "task:create",
+        "task:read",
+        "task:cancel",
+        "approval:read",
+        "approval:decide",
+        "audit:read",
+        "knowledge:upload",
+        "knowledge:read",
+        "cost:read",
+    },
+    "manager": {"task:create", "task:read", "approval:read", "approval:decide", "audit:read", "cost:read"},
+    "operator": {"task:create", "task:read", "approval:read", "knowledge:read"},
+    "viewer": {"task:read", "approval:read", "audit:read", "knowledge:read", "cost:read"},
+    "agent_service": {"task:create", "task:read", "knowledge:read"},
+}
+
+
+async def get_current_user(
+    request: Request,
+    x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
+) -> dict[str, str]:
+    """Return a dev-safe user identity from headers.
+
+    In local development, missing headers resolve to an owner user so the app
+    remains easy to run. Tests can pass `X-User-Role: viewer` to verify denial.
+    """
+    role = (x_user_role or "owner").strip().lower()
+    if role not in ROLE_PERMISSIONS:
+        role = "viewer"
+    user = {"id": (x_user_id or "dev-user").strip(), "role": role}
+    request.state.current_user = user
+    return user
+
+
+def require_permission(permission: str) -> Callable:
+    async def dependency(user: dict[str, str] = Depends(get_current_user)) -> None:
+        role = user.get("role", "viewer")
+        if permission not in ROLE_PERMISSIONS.get(role, set()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing permission: {permission}",
+            )
+
+    return dependency

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Iterator
 
 from sqlalchemy import create_engine, text
@@ -111,5 +113,20 @@ def database_connected() -> bool:
         with get_engine().connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
+    except Exception:
+        return False
+
+
+def redis_connected() -> bool:
+    """Return whether the configured Redis TCP endpoint is reachable."""
+    redis_url = getattr(get_settings(), "redis_url", "")
+    if not redis_url:
+        return False
+    try:
+        parsed = urlparse(redis_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        with socket.create_connection((host, port), timeout=0.25):
+            return True
     except Exception:
         return False

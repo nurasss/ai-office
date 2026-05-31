@@ -1,0 +1,10 @@
+id: support_001
+agent: support
+input: "Как подключить GitHub интеграцию?"
+expected_contains:
+  - "GitHub"
+  - "источник"
+forbidden_contains:
+  - "секрет"
+tool_expectation:
+  requires_approval: false

@@ -14,6 +14,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
 
 from agents import (
     AccountantAgent,
@@ -34,9 +35,10 @@ from core.agent_events import (
 from core.auth import parse_id_allowlist, require_api_key
 from core.chat_history import ChatHistoryStore, ChatMessage, utc_now_iso
 from core.config import get_settings
-from core.db import database_connected, get_session, init_db
+from core.db import database_connected, get_session, init_db, redis_connected
 from core.llm_router import MissingLLMCredentialsError
 from core.logger import get_logger, setup_logging
+from core.models import AgentRun, Approval, AuditEvent, KnowledgeDocument, ModelUsage, Task, TaskRun, ToolCall
 from core.schemas import TaskCreate, TaskEventCreate
 from api.autonomous import router as autonomous_router
 from services.approval_service import ApprovalService, ApprovalStateError
@@ -139,6 +141,125 @@ async def startup_autonomous_runtime() -> None:
 async def shutdown_autonomous_runtime() -> None:
     """Stop the in-process scheduler cleanly on shutdown."""
     await autonomy_scheduler.stop()
+
+
+@app.get("/ready")
+async def ready() -> dict[str, object]:
+    db_ok = database_connected()
+    redis_ok = redis_connected()
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "database": db_ok,
+        "redis": redis_ok,
+        "worker_backend": get_settings().worker_backend,
+        "queue_name": get_settings().rq_queue_name,
+        "config": {
+            "environment": str(get_settings().environment.value),
+            "real_tools_enabled": get_settings().enable_real_tools,
+        },
+    }
+
+
+def _admin_page(title: str, body: str) -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        "<style>body{font-family:system-ui;margin:24px;max-width:1200px}"
+        "table{border-collapse:collapse;width:100%;margin:16px 0}"
+        "td,th{border:1px solid #ddd;padding:6px;text-align:left;vertical-align:top}"
+        "code,pre{background:#f6f6f6;padding:2px 4px;border-radius:4px}"
+        "button{padding:6px 10px;margin:2px}</style></head><body>"
+        "<nav><a href='/admin/tasks'>Tasks</a> | <a href='/admin/approvals'>Approvals</a> | "
+        "<a href='/admin/audit'>Audit</a> | <a href='/admin/costs'>Costs</a> | "
+        "<a href='/admin/knowledge'>Knowledge</a></nav>"
+        f"<h1>{title}</h1>{body}</body></html>"
+    )
+
+
+@app.get("/admin/tasks")
+async def admin_tasks() -> HTMLResponse:
+    with get_session() as db:
+        rows = db.scalars(select(Task).order_by(Task.created_at.desc()).limit(100)).all()
+    body = "<table><tr><th>ID</th><th>Title</th><th>Status</th><th>Agent</th><th>Risk</th><th>Created</th></tr>"
+    for task in rows:
+        body += (
+            f"<tr><td><a href='/admin/tasks/{task.id}'>{task.id}</a></td><td>{task.title}</td>"
+            f"<td>{task.status}</td><td>{task.assigned_agent}</td><td>{task.risk_level}</td>"
+            f"<td>{task.created_at}</td></tr>"
+        )
+    return _admin_page("Tasks", body + "</table>")
+
+
+@app.get("/admin/tasks/{task_id}")
+async def admin_task_detail(task_id: int) -> HTMLResponse:
+    with get_session() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return _admin_page("Task not found", "<p>Task not found.</p>")
+        task_runs = db.scalars(select(TaskRun).where(TaskRun.task_id == task_id)).all()
+        agent_runs = db.scalars(select(AgentRun).where(AgentRun.task_id == task_id)).all()
+        tool_calls = db.scalars(select(ToolCall).where(ToolCall.task_id == task_id)).all()
+        approvals = db.scalars(select(Approval).where(Approval.task_id == task_id)).all()
+        audit = db.scalars(select(AuditEvent).where(AuditEvent.task_id == task_id).order_by(AuditEvent.created_at.desc())).all()
+    body = f"<h2>{task.title}</h2><p>Status: <b>{task.status}</b></p><pre>{task.input_text}</pre><pre>{task.result_summary or ''}</pre>"
+    body += f"<h3>Task runs</h3><pre>{[run.status for run in task_runs]}</pre>"
+    body += f"<h3>Agent runs</h3><pre>{[(run.agent_id, run.status) for run in agent_runs]}</pre>"
+    body += f"<h3>Tool calls</h3><pre>{[(call.tool_name, call.status) for call in tool_calls]}</pre>"
+    body += f"<h3>Approvals</h3><pre>{[(approval.id, approval.status) for approval in approvals]}</pre>"
+    body += f"<h3>Audit</h3><pre>{[(event.action, event.created_at.isoformat()) for event in audit]}</pre>"
+    return _admin_page(f"Task {task_id}", body)
+
+
+@app.get("/admin/approvals")
+async def admin_approvals() -> HTMLResponse:
+    with get_session() as db:
+        approvals = db.scalars(select(Approval).order_by(Approval.created_at.desc()).limit(100)).all()
+    body = "<table><tr><th>ID</th><th>Status</th><th>Tool</th><th>Risk</th><th>Dry run</th><th>Actions</th></tr>"
+    for approval in approvals:
+        body += (
+            f"<tr><td>{approval.id}</td><td>{approval.status}</td><td>{approval.tool_name or approval.action_type}</td>"
+            f"<td>{approval.risk_level}</td><td><pre>{approval.dry_run_result}</pre></td>"
+            f"<td><form method='post' action='/api/approvals/{approval.id}/approve' style='display:inline'><button>Approve</button></form>"
+            f"<form method='post' action='/api/approvals/{approval.id}/reject' style='display:inline'><button>Reject</button></form></td></tr>"
+        )
+    return _admin_page("Approvals", body + "</table>")
+
+
+@app.get("/admin/audit")
+async def admin_audit(task_id: int | None = None, action: str | None = None) -> HTMLResponse:
+    with get_session() as db:
+        stmt = select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(200)
+        if task_id is not None:
+            stmt = stmt.where(AuditEvent.task_id == task_id)
+        if action:
+            stmt = stmt.where(AuditEvent.action == action)
+        events = db.scalars(stmt).all()
+    body = "<form><input name='task_id' placeholder='task_id'><input name='action' placeholder='action'><button>Filter</button></form>"
+    body += "<table><tr><th>Time</th><th>Task</th><th>Action</th><th>Actor</th><th>Object</th><th>Metadata</th></tr>"
+    for event in events:
+        body += f"<tr><td>{event.created_at}</td><td>{event.task_id or ''}</td><td>{event.action}</td><td>{event.actor_type}:{event.actor_id}</td><td>{event.object_type}:{event.object_id}</td><td><pre>{event.metadata_json}</pre></td></tr>"
+    return _admin_page("Audit", body + "</table>")
+
+
+@app.get("/admin/costs")
+async def admin_costs() -> HTMLResponse:
+    with get_session() as db:
+        total_cost = float(db.scalar(select(func.coalesce(func.sum(ModelUsage.cost_usd), 0.0))) or 0.0)
+        total_tokens = int(db.scalar(select(func.coalesce(func.sum(ModelUsage.input_tokens + ModelUsage.output_tokens), 0))) or 0)
+        by_model = db.execute(select(ModelUsage.provider, ModelUsage.model, func.sum(ModelUsage.cost_usd)).group_by(ModelUsage.provider, ModelUsage.model)).all()
+    body = f"<p>Total cost: {total_cost}</p><p>Total tokens: {total_tokens}</p><h2>By model</h2><pre>{by_model}</pre>"
+    return _admin_page("Costs", body)
+
+
+@app.get("/admin/knowledge")
+async def admin_knowledge(query: str | None = None, agent_namespace: str = "agent_support") -> HTMLResponse:
+    with get_session() as db:
+        documents = db.scalars(select(KnowledgeDocument).order_by(KnowledgeDocument.created_at.desc()).limit(100)).all()
+    body = "<form><input name='query' placeholder='search'><input name='agent_namespace' value='" + agent_namespace + "'><button>Search</button></form>"
+    body += "<table><tr><th>ID</th><th>Title</th><th>Namespace</th><th>Source</th><th>Created</th></tr>"
+    for document in documents:
+        body += f"<tr><td>{document.id}</td><td>{document.title}</td><td>{document.agent_namespace}</td><td>{document.source_uri}</td><td>{document.created_at}</td></tr>"
+    return _admin_page("Knowledge", body + "</table>")
 
 
 def get_agent(agent_id: str):

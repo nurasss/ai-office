@@ -305,7 +305,7 @@ def test_non_expired_approval_remains_pending(tmp_path, monkeypatch):
 
 def test_autonomous_status_endpoint_and_health_do_not_leak_secrets(tmp_path, monkeypatch):
     headers = configure_runtime(monkeypatch, tmp_path)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret-value")
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-openai-secret-value")
     get_settings.cache_clear()
     client = TestClient(web_app.app)
 
@@ -319,5 +319,5 @@ def test_autonomous_status_endpoint_and_health_do_not_leak_secrets(tmp_path, mon
     health = client.get("/health")
     assert health.status_code == 200
     health_text = health.text
-    assert "sk-test-secret-value" not in health_text
+    assert "fake-openai-secret-value" not in health_text
     assert health.json()["model_keys"]["openai"] is True

@@ -11,6 +11,7 @@ from core.config import get_settings
 from core.models import Approval, utc_now
 from core.schemas import ApprovalCreate, TaskEventCreate
 from core.task_lifecycle import TASK_CANCELLED, TASK_QUEUED, TASK_WAITING_APPROVAL
+from services.audit_service import audit_log
 from services.task_service import TaskService
 
 
@@ -31,6 +32,18 @@ class ApprovalService:
             requested_by_agent=payload.requested_by_agent,
         )
         self.db.add(approval)
+        self.db.flush()
+        audit_log(
+            self.db,
+            workspace_id="default",
+            task_id=approval.task_id,
+            actor_type="system",
+            actor_id="approval_service",
+            action="tool.approval_requested",
+            object_type="approval",
+            object_id=approval.id or "",
+            metadata={"action_type": approval.action_type, "requested_by_agent": approval.requested_by_agent},
+        )
         self.db.commit()
         self.db.refresh(approval)
         if approval.task_id:
@@ -87,6 +100,24 @@ class ApprovalService:
                 ),
                 commit=False,
             )
+        audit_log(
+            self.db,
+            workspace_id="default",
+            task_id=approval.task_id,
+            actor_type="user",
+            actor_id=approved_by,
+            action="approval.approved",
+            object_type="approval",
+            object_id=approval.id,
+            metadata={"message": message, "tool_call_id": approval.tool_call_id},
+        )
+        if approval.tool_call_id:
+            from tools.registry import ToolExecutionService
+
+            ToolExecutionService(self.db).execute_approved_tool_call(
+                approval.tool_call_id,
+                approved_by=approved_by,
+            )
         self.db.commit()
         self.db.refresh(approval)
         return approval
@@ -125,6 +156,17 @@ class ApprovalService:
                 ),
                 commit=False,
             )
+        audit_log(
+            self.db,
+            workspace_id="default",
+            task_id=approval.task_id,
+            actor_type="user",
+            actor_id=approved_by,
+            action="approval.rejected",
+            object_type="approval",
+            object_id=approval.id,
+            metadata={"message": message, "tool_call_id": approval.tool_call_id},
+        )
         self.db.commit()
         self.db.refresh(approval)
         return approval

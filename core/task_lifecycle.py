@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 TASK_PLANNED = "planned"
+TASK_PENDING = "pending"
 TASK_QUEUED = "queued"
 TASK_RUNNING = "running"
 TASK_WAITING_APPROVAL = "waiting_approval"
@@ -16,6 +17,7 @@ TASK_STUCK = "stuck"
 
 OPEN_TASK_STATUSES = {
     TASK_PLANNED,
+    TASK_PENDING,
     TASK_QUEUED,
     TASK_RUNNING,
     TASK_WAITING_APPROVAL,
@@ -46,4 +48,3 @@ def is_older_than(value: datetime | None, *, minutes: int) -> bool:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value <= utc_now() - timedelta(minutes=max(minutes, 0))
-
