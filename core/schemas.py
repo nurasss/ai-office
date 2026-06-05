@@ -263,6 +263,7 @@ class PMOTaskPlanItem(BaseModel):
     description: str = ""
     assigned_agent: AgentId = "pmo"
     priority: int = Field(default=3, ge=1, le=5)
+    depends_on: list[str] = Field(default_factory=list)
     requires_approval: bool = False
     base_agent: str | None = None
     profile_id: str | None = None

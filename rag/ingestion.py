@@ -7,8 +7,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from rag.pgvector_store import create_document
-from services.audit_service import audit_log
+from services.knowledge_service import KnowledgeService
 
 
 SUPPORTED_SUFFIXES = {".md", ".txt", ".pdf", ".csv", ".json"}
@@ -34,8 +33,7 @@ def ingest_text(
     file_type: str,
     content: str,
 ) -> dict[str, object]:
-    document, chunks = create_document(
-        db,
+    return KnowledgeService(db).ingest_text(
         workspace_id=workspace_id,
         agent_namespace=agent_namespace,
         title=title,
@@ -43,26 +41,3 @@ def ingest_text(
         file_type=file_type,
         content=content,
     )
-    audit_log(
-        db,
-        workspace_id=workspace_id,
-        actor_type="user",
-        actor_id="api",
-        action="knowledge.document_uploaded",
-        object_type="knowledge_document",
-        object_id=document.id,
-        metadata={"agent_namespace": agent_namespace, "source_uri": source_uri, "chunks": len(chunks)},
-    )
-    for chunk in chunks:
-        audit_log(
-            db,
-            workspace_id=workspace_id,
-            actor_type="system",
-            actor_id="rag_ingestion",
-            action="knowledge.chunk_created",
-            object_type="knowledge_chunk",
-            object_id=chunk.id,
-            metadata={"document_id": document.id, "agent_namespace": agent_namespace},
-        )
-    db.commit()
-    return {"document_id": document.id, "chunks": len(chunks)}

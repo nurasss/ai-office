@@ -5,9 +5,9 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from core.config import get_settings
-from rag.pgvector_store import search_chunks
 from security.prompt_injection import detect_prompt_injection, sanitize_retrieved_context
 from services.audit_service import audit_log
+from services.knowledge_service import KnowledgeService
 
 
 AGENT_NAMESPACES = {
@@ -38,21 +38,22 @@ def retrieve_context(
     top_k: int | None = None,
 ) -> list[dict[str, object]]:
     allowed = allowed_namespaces_for(agent_namespace)
-    results = search_chunks(
-        db,
+    results = KnowledgeService(db).search(
         query=query,
+        agent_namespace=agent_namespace,
         workspace_id=workspace_id,
-        allowed_namespaces=allowed,
         top_k=top_k or get_settings().rag_default_top_k,
     )
     sanitized: list[dict[str, object]] = []
     for result in results:
         content = str(result.pop("content", ""))
         findings = detect_prompt_injection(content)
+        sanitized_chunk = sanitize_retrieved_context(content)
         sanitized.append(
             {
                 **result,
                 "content_preview": sanitize_retrieved_context(str(result.get("content_preview", ""))),
+                "chunk": sanitized_chunk,
                 "prompt_injection_findings": [finding.__dict__ for finding in findings],
             }
         )

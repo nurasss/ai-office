@@ -358,6 +358,8 @@ class KnowledgeChunk(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     content_hash: Mapped[str] = mapped_column(String(128), default="", index=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    embedding_model: Mapped[str] = mapped_column(String(128), default="", index=True)
+    embedding_dimensions: Mapped[int] = mapped_column(Integer, default=0)
     embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
@@ -385,3 +387,120 @@ class ModelUsage(Base):
 
     task_run: Mapped[TaskRun | None] = relationship(back_populates="model_usage")
     agent_run: Mapped[AgentRun | None] = relationship(back_populates="model_usage")
+
+
+class UserProfile(Base, TimestampMixin):
+    __tablename__ = "user_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    primary_project_slug: Mapped[str] = mapped_column(String(120), default="")
+    communication_style: Mapped[str] = mapped_column(Text, default="")
+    goals_summary: Mapped[str] = mapped_column(Text, default="")
+    preferences_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+
+class Goal(Base, TimestampMixin):
+    __tablename__ = "goals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
+    user_external_id: Mapped[str] = mapped_column(String(128), default="telegram-user", index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    autonomy_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    plan_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    last_daily_plan: Mapped[str] = mapped_column(Text, default="")
+    last_review_summary: Mapped[str] = mapped_column(Text, default="")
+
+
+class ScheduledJob(Base, TimestampMixin):
+    __tablename__ = "scheduled_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    schedule_type: Mapped[str] = mapped_column(String(64), default="interval", index=True)
+    cron_expr: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    runs: Mapped[list["ScheduledJobRun"]] = relationship(back_populates="job")
+
+
+class ScheduledJobRun(Base):
+    __tablename__ = "scheduled_job_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scheduled_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    job_key: Mapped[str] = mapped_column(String(128), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    job: Mapped[ScheduledJob | None] = relationship(back_populates="runs")
+    created_task: Mapped[Task | None] = relationship()
+
+
+class SchedulerLock(Base):
+    __tablename__ = "scheduler_locks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lock_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    owner_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class GeneratedSite(Base, TimestampMixin):
+    __tablename__ = "generated_sites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
+    user_external_id: Mapped[str] = mapped_column(String(128), default="telegram-user", index=True)
+    project_slug: Mapped[str] = mapped_column(String(120), default="")
+    title: Mapped[str] = mapped_column(String(255), default="")
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    site_type: Mapped[str] = mapped_column(String(64), default="landing")
+    directory_path: Mapped[str] = mapped_column(Text, default="")
+    public_path: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="ready", index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+
+class GeneratedTool(Base, TimestampMixin):
+    __tablename__ = "generated_tools"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tool_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
+    user_external_id: Mapped[str] = mapped_column(String(128), default="telegram-user", index=True)
+    project_slug: Mapped[str] = mapped_column(String(120), default="")
+    title: Mapped[str] = mapped_column(String(255), default="")
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    tool_type: Mapped[str] = mapped_column(String(64), default="calculator")
+    directory_path: Mapped[str] = mapped_column(Text, default="")
+    public_path: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="ready", index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
