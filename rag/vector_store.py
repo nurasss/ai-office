@@ -8,7 +8,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+
 from core.config import get_settings
+from core.db import get_session, init_db, should_auto_create_tables
+from core.models import KnowledgeDocument
+from rag.pgvector_store import search_chunks
+from services.knowledge_service import KnowledgeService
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOCAL_JSON_PATH = PROJECT_ROOT / "data" / "vector_store" / "documents.jsonl"
@@ -132,8 +138,89 @@ class LocalJsonVectorStore(BaseVectorStore):
         return f"{source}:{index}"
 
 
-class PgVectorStore(LocalJsonVectorStore):
-    """Local fallback for pgvector until a database-backed store is configured."""
+class PgVectorStore(BaseVectorStore):
+    """DB-backed pgvector store with local emergency fallback only when required."""
+
+    async def upsert(self, documents: list[dict[str, Any]]) -> None:
+        if should_auto_create_tables():
+            init_db()
+        with get_session() as db:
+            KnowledgeService(db).upsert_retriever_documents(documents=documents)
+
+    async def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        if should_auto_create_tables():
+            init_db()
+        filters = filters or {}
+        workspace_id = str(filters.get("workspace_id") or "default")
+        namespace_filter = filters.get("namespace") or {}
+        allowed_namespaces = _normalize_namespace_filter(namespace_filter)
+        if not allowed_namespaces:
+            return []
+
+        with get_session() as db:
+            results = search_chunks(
+                db,
+                query=query,
+                workspace_id=workspace_id,
+                allowed_namespaces=allowed_namespaces,
+                top_k=top_k,
+            )
+
+        allowed_set = set(allowed_namespaces)
+        agent_id_filter = filters.get("agent_id")
+        allowed_agent_ids = set(_normalize_agent_filter(agent_id_filter)) if agent_id_filter else None
+        normalized: list[dict[str, Any]] = []
+        for result in results:
+            namespace = str(result.get("agent_namespace", ""))
+            if namespace not in allowed_set:
+                continue
+            metadata = {
+                "namespace": namespace,
+                "source": result.get("source_uri", ""),
+                "source_id": result.get("source_uri", ""),
+            }
+            source_uri = str(result.get("source_uri", ""))
+            agent_id = _infer_agent_id_from_namespace(namespace, source_uri)
+            if agent_id:
+                metadata["agent_id"] = agent_id
+            if allowed_agent_ids is not None and metadata.get("agent_id") not in allowed_agent_ids:
+                continue
+            normalized.append(
+                {
+                    "id": f"knowledge_chunk:{result.get('chunk_id')}",
+                    "content": result.get("chunk", "") or result.get("content", ""),
+                    "score": float(result.get("score", 0.0) or 0.0),
+                    "metadata": metadata,
+                }
+            )
+        return normalized[:top_k]
+
+    async def delete(self, ids: list[str]) -> None:
+        if not ids:
+            return
+        if should_auto_create_tables():
+            init_db()
+        source_uris = {
+            item.split(":", 1)[1]
+            for item in ids
+            if ":" in item and item.split(":", 1)[0] == "source"
+        }
+        if not source_uris:
+            return
+        with get_session() as db:
+            documents = list(
+                db.scalars(
+                    select(KnowledgeDocument).where(KnowledgeDocument.source_uri.in_(source_uris))
+                )
+            )
+            for document in documents:
+                db.delete(document)
+            db.commit()
 
 
 class PineconeVectorStore(LocalJsonVectorStore):
@@ -143,8 +230,7 @@ class PineconeVectorStore(LocalJsonVectorStore):
 def create_vector_store(backend: str | None = None) -> BaseVectorStore:
     """Create the configured vector store.
 
-    The production backends are represented by local fallbacks in this demo
-    project so the app can run without external infrastructure.
+    The local JSON backend remains available for serverless/demo mode.
     """
     selected = (backend or "local_json").strip().lower()
     settings = get_settings()
@@ -156,7 +242,7 @@ def create_vector_store(backend: str | None = None) -> BaseVectorStore:
     if selected == "local_json":
         return LocalJsonVectorStore(local_path)
     if selected == "pgvector":
-        return PgVectorStore(local_path)
+        return PgVectorStore()
     if selected == "pinecone":
         return PineconeVectorStore(local_path)
     raise ValueError(f"Unknown vector store backend: {backend}")
@@ -186,3 +272,44 @@ def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
         if actual != expected:
             return False
     return True
+
+
+def _normalize_namespace_filter(value: Any) -> list[str]:
+    if isinstance(value, dict) and "$in" in value:
+        value = value["$in"]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item).strip()]
+    if value:
+        return [str(value)]
+    return []
+
+
+def _normalize_agent_filter(value: Any) -> list[str]:
+    if isinstance(value, dict) and "$in" in value:
+        value = value["$in"]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item).strip()]
+    if value:
+        return [str(value)]
+    return []
+
+
+def _infer_agent_id_from_namespace(namespace: str, source_uri: str) -> str:
+    if namespace.startswith("agent_"):
+        suffix = namespace.removeprefix("agent_")
+        if suffix == "analyst":
+            return "data_analyst"
+        return suffix
+    source_parts = Path(source_uri).parts
+    if "knowledge" in source_parts:
+        try:
+            knowledge_index = source_parts.index("knowledge")
+            candidate = source_parts[knowledge_index + 1]
+        except (ValueError, IndexError):
+            return "common"
+        if candidate == "common":
+            return "common"
+        if candidate == "data_analyst":
+            return "data_analyst"
+        return candidate
+    return "common"

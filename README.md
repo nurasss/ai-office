@@ -1,12 +1,13 @@
 # AI Office — личный автономный AI office
 
-Мультиагентная FastAPI-система из 7 ИИ-сотрудников с Telegram-интерфейсом, RAG/knowledge-слоем и production-pilot execution plane.
+Мультиагентная FastAPI-система из 7 ИИ-сотрудников с Telegram-интерфейсом, RAG/knowledge-слоем, goal engine и demo-product surface: dashboard, memory, generated sites и interactive tools.
 
 ## Архитектура
 
 ```
 Telegram / Web / API
   -> PMO / agent routing
+  -> Goal engine / memory
   -> Task Engine
   -> SQLAlchemy DB (PostgreSQL or local SQLite)
   -> Worker
@@ -49,6 +50,84 @@ curl http://localhost:8000/api/autonomous/status
 ```
 
 Без API-ключей проект работает в fake/dry-run mode: модели deterministic, GitHub write создает dry-run + approval, Telegram без токена просто пропускает отправку.
+
+## Controlled Pilot Production Package
+
+Production readiness is guarded by explicit scripts and fail-fast startup checks:
+
+```bash
+ruff check .
+python scripts/check_no_secrets.py
+python scripts/production_preflight.py
+python scripts/check_migrations.py
+./scripts/make_release_archive.sh
+python scripts/check_no_secrets.py dist/ai-office-release.zip
+```
+
+Use `.env.example` for local development and `.env.production.example` for
+VPS/staging/prod. In `ENVIRONMENT=production`, startup rejects placeholder
+API/admin/cron secrets, SQLite, missing Redis, fake model/embedding providers,
+wildcard CORS, missing Telegram allowlists, and unsafe real-tool/autonomy
+combinations.
+
+VPS staging:
+
+```bash
+POSTGRES_PASSWORD=change-me \
+AI_OFFICE_API_KEY=change-me \
+AI_OFFICE_ADMIN_TOKEN=change-me-admin \
+CRON_SECRET=change-me-cron \
+TELEGRAM_WEBHOOK_SECRET=change-me-webhook \
+docker compose -f docker-compose.prod.yml up -d --build postgres redis migrate api worker scheduler
+```
+
+Admin/dashboard pages require `Authorization: Bearer <AI_OFFICE_ADMIN_TOKEN>`.
+Public API clients use `X-API-Key: <AI_OFFICE_API_KEY>` when
+`AI_OFFICE_REQUIRE_API_KEY=true`.
+
+Runbooks: `docs/PRODUCTION_READINESS.md`, `docs/STAGING_RUNBOOK.md`,
+`docs/OPERATIONS_RUNBOOK.md`, `docs/SECURITY.md`, `docs/TOOLS.md`, and
+`docs/PILOT_LAUNCH_CHECKLIST.md`.
+
+## P2 Demo Product
+
+P2 добавляет продуктовый слой поверх pilot runtime:
+
+- Telegram Product Bot: чат, product-команды, inline approvals
+- Goal Engine: `/add_goal`, `/goals`, `/daily_plan`
+- Memory: пользователь, проект, стиль общения, важные факты
+- Generated sites: `/sites/{site_id}`
+- Generated tools: `/tools/{tool_id}`
+- Demo pages: `/dashboard`, `/agents`, `/goals`, `/tasks`, `/sites`, `/tools`, `/memory`, `/landing`
+- Separate compose stack: `docker-compose.prod.yml`
+- Demo seed: `uv run python scripts/seed_demo.py`
+
+Ключевые Telegram-команды:
+
+```text
+/status
+/add_goal
+/goals
+/tasks
+/daily_plan
+/memory
+/create_site
+/create_tool
+/brain_status
+/approve <id>
+/reject <id>
+```
+
+Поддерживаются и естественные запросы:
+
+```text
+запомни: мой главный проект сейчас AI Office
+что ты обо мне помнишь?
+что ты знаешь про мой проект?
+создай сайт для AI Office
+создай калькулятор стоимости AI Office
+создай GitHub issue с задачами на завтра
+```
 
 ## Агенты
 
@@ -170,7 +249,7 @@ curl -X POST -H "Content-Type: application/json" \
 curl -X POST http://localhost:8000/api/autonomy/daily-plan
 ```
 
-Telegram-команды: `/tasks`, `/tasks today`, `/projects`, `/project ai-office`, `/plan`, `/approve <id>`, `/reject <id>`, `/autonomy status`, `/autonomy on`, `/autonomy off`.
+Telegram-команды: `/status`, `/add_goal`, `/goals`, `/daily_plan`, `/memory`, `/create_site`, `/create_tool`, `/brain_status`, `/tasks`, `/tasks today`, `/projects`, `/project ai-office`, `/plan`, `/approve <id>`, `/reject <id>`, `/autonomy status`, `/autonomy on`, `/autonomy off`.
 
 Автоматически разрешены read-only проверки, планирование, task/status updates, draft results и подготовка patch/prompt. Deploy, push/merge, удаление файлов, env/secrets, CRM/email/money actions и произвольные shell-команды требуют approval. Pending approvals истекают по `AI_OFFICE_APPROVAL_TTL_HOURS`; stuck/failed задачи ограничены retry budget через `AI_OFFICE_TASK_MAX_RETRIES`.
 
@@ -189,6 +268,17 @@ Admin pilot pages:
 - `/admin/costs`
 - `/admin/knowledge`
 
+P2 product pages:
+
+- `/dashboard`
+- `/agents`
+- `/goals`
+- `/tasks`
+- `/sites`
+- `/tools`
+- `/memory`
+- `/landing`
+
 Evals:
 
 ```bash
@@ -200,6 +290,16 @@ Smoke test against a running local app:
 ```bash
 bash scripts/pilot_smoke_test.sh
 ```
+
+24/7 demo/prod-style local run:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+uv run alembic upgrade head
+uv run python scripts/seed_demo.py
+```
+
+Demo walkthrough: `DEMO_SCRIPT.md`
 
 Подробнее: `docs/OPERATIONS_RUNBOOK.md`, `docs/AUTONOMOUS_RUNTIME.md`, `docs/SECURITY.md`, `SECURITY.md`, `docs/TELEGRAM_COMMANDS.md`.
 

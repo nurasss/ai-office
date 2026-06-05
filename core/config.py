@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     rag_default_top_k: int = Field(default=6, validation_alias="RAG_DEFAULT_TOP_K")
     embedding_provider: str = Field(default="fake", validation_alias="EMBEDDING_PROVIDER")
     embedding_model: str = Field(default="fake-embedding", validation_alias="EMBEDDING_MODEL")
+    embedding_dimensions: int = Field(default=1536, validation_alias="EMBEDDING_DIMENSIONS")
+    embedding_batch_size: int = Field(default=32, validation_alias="EMBEDDING_BATCH_SIZE")
+    rag_lexical_fallback_enabled: bool = Field(
+        default=True,
+        validation_alias="RAG_LEXICAL_FALLBACK_ENABLED",
+    )
+    pgvector_similarity_metric: str = Field(
+        default="cosine",
+        validation_alias="PGVECTOR_SIMILARITY_METRIC",
+    )
     local_vector_store_path: str = Field(
         default="data/vector_store/documents.jsonl",
         validation_alias="LOCAL_VECTOR_STORE_PATH",
@@ -123,6 +133,7 @@ class Settings(BaseSettings):
 
     # ── App ────────────────────────────────────────────────────────────
     ai_office_api_key: str = Field(default="", validation_alias="AI_OFFICE_API_KEY")
+    ai_office_admin_token: str = Field(default="", validation_alias="AI_OFFICE_ADMIN_TOKEN")
     app_env: str = Field(default="development", validation_alias="APP_ENV")
     app_name: str = Field(default="AI Office", validation_alias="APP_NAME")
     app_base_url: str = Field(default="http://localhost:8000", validation_alias="APP_BASE_URL")
@@ -130,6 +141,8 @@ class Settings(BaseSettings):
         default="http://localhost:3000",
         validation_alias="FRONTEND_BASE_URL",
     )
+    generated_sites_root: str = Field(default="generated_sites", validation_alias="GENERATED_SITES_ROOT")
+    generated_tools_root: str = Field(default="generated_tools", validation_alias="GENERATED_TOOLS_ROOT")
     ai_office_require_api_key: bool = Field(
         default=False, validation_alias="AI_OFFICE_REQUIRE_API_KEY"
     )
@@ -146,11 +159,20 @@ class Settings(BaseSettings):
     default_strong_model: str = Field(default="fake-strong", validation_alias="DEFAULT_STRONG_MODEL")
     model_provider_primary: str = Field(default="fake", validation_alias="MODEL_PROVIDER_PRIMARY")
     model_provider_fallback: str = Field(default="fake", validation_alias="MODEL_PROVIDER_FALLBACK")
+    brain_provider: str = Field(default="fake", validation_alias="BRAIN_PROVIDER")
+    brain_base_url: str = Field(default="", validation_alias="BRAIN_BASE_URL")
+    brain_api_key: str = Field(default="", validation_alias="BRAIN_API_KEY")
+    brain_cheap_model: str = Field(default="fake-cheap", validation_alias="BRAIN_CHEAP_MODEL")
+    brain_strong_model: str = Field(default="fake-strong", validation_alias="BRAIN_STRONG_MODEL")
+    brain_code_model: str = Field(default="fake-code", validation_alias="BRAIN_CODE_MODEL")
     enable_real_tools: bool = Field(default=False, validation_alias="ENABLE_REAL_TOOLS")
     enable_approval_required: bool = Field(default=True, validation_alias="ENABLE_APPROVAL_REQUIRED")
     enable_pii_redaction: bool = Field(default=True, validation_alias="ENABLE_PII_REDACTION")
     enable_cost_tracking: bool = Field(default=True, validation_alias="ENABLE_COST_TRACKING")
     enable_rag_citations: bool = Field(default=True, validation_alias="ENABLE_RAG_CITATIONS")
+    ai_office_daily_budget_usd: str = Field(default="", validation_alias="AI_OFFICE_DAILY_BUDGET_USD")
+    ai_office_monthly_budget_usd: str = Field(default="", validation_alias="AI_OFFICE_MONTHLY_BUDGET_USD")
+    ai_office_budget_enforcement: str = Field(default="warn", validation_alias="AI_OFFICE_BUDGET_ENFORCEMENT")
     enable_pmo_agent: bool = Field(default=True, validation_alias="ENABLE_PMO_AGENT")
     enable_support_agent: bool = Field(default=True, validation_alias="ENABLE_SUPPORT_AGENT")
     enable_developer_agent: bool = Field(default=True, validation_alias="ENABLE_DEVELOPER_AGENT")
@@ -231,6 +253,14 @@ class Settings(BaseSettings):
         if isinstance(v, Environment):
             return v
         return Environment(v.lower().strip())
+
+    @field_validator("pgvector_similarity_metric")
+    @classmethod
+    def _normalize_pgvector_metric(cls, v: str) -> str:
+        normalized = v.lower().strip()
+        if normalized not in {"cosine", "inner_product"}:
+            raise ValueError(f"Invalid PGVECTOR_SIMILARITY_METRIC: {v}")
+        return normalized
 
     def require(self, *keys: str) -> None:
         """Raise if any required env vars are empty."""

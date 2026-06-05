@@ -1,0 +1,31 @@
+# Pilot Launch Checklist
+
+- VPS provisioned, patched, and SSH access limited.
+- Domain DNS points to the VPS.
+- HTTPS reverse proxy configured with `deploy/Caddyfile.example` or equivalent.
+- `.env.production` created from `.env.production.example`.
+- `ENVIRONMENT=production` only after all placeholders are replaced.
+- `POSTGRES_PASSWORD`, `AI_OFFICE_API_KEY`, `AI_OFFICE_ADMIN_TOKEN`, `CRON_SECRET`, and `TELEGRAM_WEBHOOK_SECRET` are long random values.
+- `AI_OFFICE_ALLOWED_ORIGINS` contains only trusted public origins.
+- `DATABASE_URL` points to Postgres, not SQLite.
+- `REDIS_URL` points to Redis and `WORKER_BACKEND=redis`.
+- `VECTOR_BACKEND=pgvector` and pgvector migration applied.
+- `python scripts/production_preflight.py` passes.
+- `python scripts/check_migrations.py` passes.
+- `python scripts/live_pgvector_smoke.py` passes.
+- `/health` and `/ready` pass through HTTPS.
+- API key rejection and success tested.
+- Admin token rejection and success tested.
+- Redis/RQ worker processed a safe task.
+- Scheduler tick tested and cannot overlap.
+- Telegram webhook secret and allowlist tested.
+- GitHub/Jira/Slack dry-run paths tested.
+- Approval create, approve, reject, and audit entries tested.
+- `ENABLE_REAL_TOOLS=false` until owner signs off on scopes.
+- Budget caps configured with `AI_OFFICE_DAILY_BUDGET_USD`, `AI_OFFICE_MONTHLY_BUDGET_USD`, and `AI_OFFICE_BUDGET_ENFORCEMENT`.
+- Postgres backup and restore tested.
+- Secret rotation procedure tested.
+- Rollback plan documented.
+- Owner/admin assigned for approvals.
+- 3 to 5 pilot scenarios prepared for each agent role.
+- Pilot KPIs selected: task completion rate, approval latency, cost per task, failed/stuck tasks, Telegram response time, user satisfaction.

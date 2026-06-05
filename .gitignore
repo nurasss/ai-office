@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 *.env.local
 *.env.secret
 *.env.prod
@@ -49,12 +50,12 @@ reports/
 workspaces/
 logs/
 tmp/
+generated_sites/
+generated_tools/
 *.db
 *.sqlite
 *.sqlite3
 node_modules/
 reports.pdf
 *.zip
-reports/
-.vercel
 reports/

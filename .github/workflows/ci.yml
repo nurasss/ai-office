@@ -31,10 +31,17 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -r requirements.txt
+          pip install ruff==0.7.0
+      - name: Lint
+        run: ruff check .
+      - name: Secret scan
+        run: python scripts/check_no_secrets.py
       - name: Run migrations
         env:
           DATABASE_URL: postgresql+psycopg2://ai_office:ai_office@localhost:5432/ai_office_test
         run: alembic upgrade head
+      - name: Production env template check
+        run: python scripts/production_preflight.py --env-file .env.production.example --template-check
       - name: Run tests
         env:
           DATABASE_URL: postgresql+psycopg2://ai_office:ai_office@localhost:5432/ai_office_test

@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import hmac
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 
@@ -32,25 +34,47 @@ from core.agent_events import (
     reset_agent_status_later,
     subscribe_agent_events,
 )
-from core.auth import parse_id_allowlist, require_api_key
+from core.auth import parse_id_allowlist, require_admin, require_api_key
 from core.chat_history import ChatHistoryStore, ChatMessage, utc_now_iso
 from core.config import get_settings
-from core.db import database_connected, get_session, init_db, redis_connected
+from core.db import database_connected, get_session, init_db, redis_connected, should_auto_create_tables
 from core.llm_router import MissingLLMCredentialsError
 from core.logger import get_logger, setup_logging
-from core.models import AgentRun, Approval, AuditEvent, KnowledgeDocument, ModelUsage, Task, TaskRun, ToolCall
+from core.models import (
+    AgentRun,
+    Approval,
+    AuditEvent,
+    GeneratedSite,
+    GeneratedTool,
+    Goal,
+    KnowledgeDocument,
+    Memory,
+    ModelUsage,
+    Task,
+    TaskRun,
+    ToolCall,
+    UserProfile,
+)
+from core.production import run_production_preflight
 from core.schemas import TaskCreate, TaskEventCreate
 from api.autonomous import router as autonomous_router
+from services.audit_service import audit_log
 from services.approval_service import ApprovalService, ApprovalStateError
+from services.artifact_generation_service import ArtifactGenerationService
 from services.autonomy_service import AutonomyService, get_autonomy_enabled, set_autonomy_enabled
-from services.project_service import ProjectService
+from services.goal_engine_service import GoalEngineService
+from services.profile_memory_service import ProfileMemoryService
+from services.project_service import ProjectService, slugify
 from services.scheduler import autonomy_scheduler
 from services.task_service import TaskService
+from tools.base import ToolContext
 from tools.external.telegram import (
+    approval_inline_keyboard,
     send_telegram_message,
     send_telegram_message_to,
     telegram_runtime_configured,
 )
+from tools.registry import ToolExecutionService
 
 load_dotenv()
 setup_logging("INFO")
@@ -129,9 +153,12 @@ TELEGRAM_THREAD_FIELDS = {
 async def startup_autonomous_runtime() -> None:
     """Initialize persistence and start the optional autonomous scheduler."""
     try:
-        init_db()
+        run_production_preflight(raise_on_error=True)
+        if should_auto_create_tables():
+            init_db()
     except Exception as error:
         logger.error("db.init.failed", error=str(error), exc_info=True)
+        raise
 
     if get_autonomy_enabled():
         autonomy_scheduler.start()
@@ -176,8 +203,49 @@ def _admin_page(title: str, body: str) -> HTMLResponse:
     )
 
 
+def _product_page(title: str, body: str, *, subtitle: str = "") -> HTMLResponse:
+    navigation = [
+        ("/dashboard", "Dashboard"),
+        ("/agents", "Agents"),
+        ("/goals", "Goals"),
+        ("/tasks", "Tasks"),
+        ("/sites", "Sites"),
+        ("/tools", "Tools"),
+        ("/memory", "Memory"),
+        ("/landing", "Landing"),
+    ]
+    nav_html = " ".join(
+        f"<a href='{href}'>{label}</a>" for href, label in navigation
+    )
+    subtitle_html = f"<p>{html.escape(subtitle)}</p>" if subtitle else ""
+    return HTMLResponse(
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{html.escape(title)}</title>"
+        "<style>"
+        ":root{color-scheme:dark;--bg:#0f1115;--panel:#171a21;--line:#282c35;--text:#f3f4f6;--muted:#9ca3af;--accent:#5b8def;}"
+        "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}"
+        "main{max-width:1180px;margin:0 auto;padding:24px}"
+        "nav{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 18px}"
+        "nav a{text-decoration:none;color:#dbeafe;background:#1e2633;border:1px solid #334155;border-radius:999px;padding:8px 12px;font-size:13px}"
+        "header{display:grid;gap:6px;margin-bottom:18px}header h1{margin:0;font-size:28px}header p{margin:0;color:var(--muted)}"
+        ".panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:14px}"
+        ".grid{display:grid;gap:14px}.cards{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}"
+        ".card{background:#1c2028;border:1px solid var(--line);border-radius:8px;padding:14px}"
+        ".muted{color:var(--muted)}.pill{display:inline-flex;background:#1f2b3f;color:#dbeafe;border-radius:999px;padding:4px 9px;font-size:12px}"
+        ".list{display:grid;gap:10px}.row{border:1px solid var(--line);border-radius:8px;background:#1c2028;padding:12px}"
+        ".row strong{display:block;margin-bottom:4px}.row p{margin:4px 0;color:var(--muted)}"
+        "table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}"
+        "code,pre{background:#10151d;border-radius:6px;padding:2px 6px;overflow:auto}a{color:#8cc2ff}"
+        "@media(max-width:900px){main{padding:18px}}"
+        "</style></head><body><main>"
+        f"<nav>{nav_html}</nav>"
+        f"<header><h1>{html.escape(title)}</h1>{subtitle_html}</header>"
+        f"{body}</main></body></html>"
+    )
+
+
 @app.get("/admin/tasks")
-async def admin_tasks() -> HTMLResponse:
+async def admin_tasks(_: None = Depends(require_admin)) -> HTMLResponse:
     with get_session() as db:
         rows = db.scalars(select(Task).order_by(Task.created_at.desc()).limit(100)).all()
     body = "<table><tr><th>ID</th><th>Title</th><th>Status</th><th>Agent</th><th>Risk</th><th>Created</th></tr>"
@@ -191,7 +259,7 @@ async def admin_tasks() -> HTMLResponse:
 
 
 @app.get("/admin/tasks/{task_id}")
-async def admin_task_detail(task_id: int) -> HTMLResponse:
+async def admin_task_detail(task_id: int, _: None = Depends(require_admin)) -> HTMLResponse:
     with get_session() as db:
         task = db.get(Task, task_id)
         if not task:
@@ -211,7 +279,7 @@ async def admin_task_detail(task_id: int) -> HTMLResponse:
 
 
 @app.get("/admin/approvals")
-async def admin_approvals() -> HTMLResponse:
+async def admin_approvals(_: None = Depends(require_admin)) -> HTMLResponse:
     with get_session() as db:
         approvals = db.scalars(select(Approval).order_by(Approval.created_at.desc()).limit(100)).all()
     body = "<table><tr><th>ID</th><th>Status</th><th>Tool</th><th>Risk</th><th>Dry run</th><th>Actions</th></tr>"
@@ -226,7 +294,11 @@ async def admin_approvals() -> HTMLResponse:
 
 
 @app.get("/admin/audit")
-async def admin_audit(task_id: int | None = None, action: str | None = None) -> HTMLResponse:
+async def admin_audit(
+    task_id: int | None = None,
+    action: str | None = None,
+    _: None = Depends(require_admin),
+) -> HTMLResponse:
     with get_session() as db:
         stmt = select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(200)
         if task_id is not None:
@@ -242,7 +314,7 @@ async def admin_audit(task_id: int | None = None, action: str | None = None) -> 
 
 
 @app.get("/admin/costs")
-async def admin_costs() -> HTMLResponse:
+async def admin_costs(_: None = Depends(require_admin)) -> HTMLResponse:
     with get_session() as db:
         total_cost = float(db.scalar(select(func.coalesce(func.sum(ModelUsage.cost_usd), 0.0))) or 0.0)
         total_tokens = int(db.scalar(select(func.coalesce(func.sum(ModelUsage.input_tokens + ModelUsage.output_tokens), 0))) or 0)
@@ -252,7 +324,11 @@ async def admin_costs() -> HTMLResponse:
 
 
 @app.get("/admin/knowledge")
-async def admin_knowledge(query: str | None = None, agent_namespace: str = "agent_support") -> HTMLResponse:
+async def admin_knowledge(
+    query: str | None = None,
+    agent_namespace: str = "agent_support",
+    _: None = Depends(require_admin),
+) -> HTMLResponse:
     with get_session() as db:
         documents = db.scalars(select(KnowledgeDocument).order_by(KnowledgeDocument.created_at.desc()).limit(100)).all()
     body = "<form><input name='query' placeholder='search'><input name='agent_namespace' value='" + agent_namespace + "'><button>Search</button></form>"
@@ -387,7 +463,8 @@ async def run_agent_text_task(
     task_id = f"web_{uuid.uuid4().hex[:8]}"
     db_task_id: int | None = None
     try:
-        init_db()
+        if should_auto_create_tables():
+            init_db()
         with get_session() as db:
             task = TaskService(db).create_task(
                 TaskCreate(
@@ -808,19 +885,29 @@ def _telegram_help_text() -> str:
     return (
         "AI Office в Telegram готов к работе.\n\n"
         "Команды:\n"
+        "/status - сводка по целям, задачам и brain\n"
+        "/add_goal цель - добавить цель и создать задачи\n"
+        "/goals - список целей\n"
         "/pmo задача - PMO выберет нужного агента\n"
         "/agent developer задача - прямой вызов агента\n"
         "/all задача - параллельный запуск всех специалистов\n"
         "/tasks - открытые задачи\n"
+        "/daily_plan - персональный план по целям\n"
         "/plan - запустить дневное планирование\n"
         "/projects - список проектов\n"
         "/project ai-office - карточка проекта\n"
+        "/memory - что бот помнит о пользователе\n"
+        "/create_site запрос - создать сайт\n"
+        "/create_tool запрос - создать инструмент\n"
+        "/brain_status - активный brain provider\n"
         "/approve 1 или /reject 1 - решение по approval\n"
         "/autonomy status|on|off - статус автономности\n"
         "/bind developer - привязать текущую тему к агенту\n"
         "/agents - список агентов\n\n"
-        "Без команды сообщение пойдет через PMO. В группе с Topics PMO может "
-        "перенаправлять работу в темы агентов."
+        "Без команды сообщение пойдет через PMO. Также можно писать естественным текстом:\n"
+        "\"запомни: мой главный проект AI Office\"\n"
+        "\"что ты обо мне помнишь?\"\n"
+        "\"создай сайт для AI Office\""
     )
 
 
@@ -836,6 +923,355 @@ def _telegram_agents_text() -> str:
         "Стратег: /agent strategist\n"
         "Бухгалтер: /agent accountant"
     )
+
+
+def _telegram_user_identity(message: dict[str, object]) -> tuple[str, str]:
+    sender = message.get("from")
+    if not isinstance(sender, dict):
+        return "telegram-user", ""
+    external_id = str(sender.get("id") or "telegram-user")
+    display_name = " ".join(
+        part.strip()
+        for part in [
+            str(sender.get("first_name") or ""),
+            str(sender.get("last_name") or ""),
+        ]
+        if part.strip()
+    ).strip()
+    if not display_name:
+        display_name = str(sender.get("username") or "")
+    return external_id, display_name
+
+
+def _find_project_slug_for_text(
+    db,
+    text: str,
+    *,
+    external_id: str = "",
+) -> str | None:
+    lowered = text.lower()
+    project_service = ProjectService(db)
+    projects = project_service.list_projects()
+    for project in projects:
+        if project.slug in lowered or project.name.lower() in lowered:
+            return project.slug
+
+    compact = slugify(text)
+    if compact and compact != "project":
+        project = project_service.get_project_by_slug(compact)
+        if project:
+            return project.slug
+
+    profile = None
+    if external_id:
+        profile = ProfileMemoryService(db).ensure_profile(external_id=external_id)
+    if profile and profile.primary_project_slug:
+        return profile.primary_project_slug
+    if projects:
+        return projects[0].slug
+    return None
+
+
+def _brain_status_text() -> str:
+    settings = get_settings()
+    base_url = settings.brain_base_url.strip() or "default provider endpoint"
+    return (
+        "Brain configuration:\n"
+        f"Provider: {settings.brain_provider}\n"
+        f"Base URL: {base_url}\n"
+        f"Cheap model: {settings.brain_cheap_model}\n"
+        f"Strong model: {settings.brain_strong_model}\n"
+        f"Code model: {settings.brain_code_model}"
+    )
+
+
+def _handle_change_brain_command(db, *, external_id: str, body: str) -> str:
+    provider = body.strip().lower()
+    if not provider:
+        return (
+            "Используйте: /change_brain openai|anthropic|google|openrouter|custom\n"
+            "Для P2 это сохраняет предпочтение пользователя; реальное переключение идет через env и restart."
+        )
+    profile = ProfileMemoryService(db).ensure_profile(external_id=external_id)
+    preferences = dict(profile.preferences_json or {})
+    preferences["brain_provider_override"] = provider
+    profile.preferences_json = preferences
+    db.add(profile)
+    db.commit()
+    return (
+        f"Сохранил brain preference: {provider}.\n"
+        "Runtime-маршрутизация для демо сейчас управляется через BRAIN_* env vars."
+    )
+
+
+def _format_telegram_goals(db, *, external_id: str) -> str:
+    engine = GoalEngineService(db)
+    goals = engine.list_goals(external_id=external_id)
+    if not goals:
+        return "Целей пока нет. Добавьте через /add_goal Подготовить AI Office к демо"
+    lines = ["Цели:"]
+    for goal in goals[:8]:
+        lines.append(
+            f"#{goal.id} [{goal.status}] {'ON' if goal.autonomy_enabled else 'OFF'} {goal.title}"
+        )
+        for index, step in enumerate((goal.plan_json or [])[:3], start=1):
+            lines.append(f"  {index}. {step.get('title', 'Следующий шаг')}")
+    return "\n".join(lines)
+
+
+def _status_summary_text(db, *, external_id: str) -> str:
+    task_counts = TaskService(db).count_by_status()
+    approval_counts = ApprovalService(db).count_by_status()
+    goal_count = len(GoalEngineService(db).list_goals(external_id=external_id))
+    site_count = len(ArtifactGenerationService(db).list_sites())
+    tool_count = len(ArtifactGenerationService(db).list_tools())
+    return (
+        f"AI Office status\n"
+        f"Goals: {goal_count}\n"
+        f"Tasks open: {task_counts.get('planned', 0) + task_counts.get('queued', 0) + task_counts.get('running', 0) + task_counts.get('waiting_approval', 0)}\n"
+        f"Approvals pending: {approval_counts.get('pending', 0)}\n"
+        f"Generated sites: {site_count}\n"
+        f"Generated tools: {tool_count}\n"
+        f"Autonomy: {'ON' if get_autonomy_enabled() else 'OFF'}\n"
+        f"Brain: {get_settings().brain_provider}"
+    )
+
+
+def _create_goal_from_telegram(
+    db,
+    *,
+    external_id: str,
+    display_name: str,
+    goal_text: str,
+) -> str:
+    if not goal_text.strip():
+        return "Укажите цель: /add_goal Подготовить AI Office к демонстрации"
+    profile_memory = ProfileMemoryService(db)
+    goal_engine = GoalEngineService(db)
+    goal = goal_engine.add_goal(external_id=external_id, title=goal_text.strip())
+    created_ids = goal_engine.create_tasks_for_goal(goal_id=goal.id)
+    project_slug = _find_project_slug_for_text(db, goal_text, external_id=external_id) or slugify(goal_text)
+    profile = profile_memory.ensure_profile(external_id=external_id, display_name=display_name)
+    if project_slug:
+        profile.primary_project_slug = project_slug
+        db.add(profile)
+        db.commit()
+    profile_memory.remember_fact(
+        external_id=external_id,
+        display_name=display_name,
+        text=f"Цель пользователя: {goal_text.strip()}",
+        project_slug=project_slug,
+    )
+    return (
+        f"[PMO] Цель добавлена: {goal.title}\n"
+        f"[PMO] Создано задач: {len(created_ids)}\n"
+        "Посмотреть: /goals и /tasks"
+    )
+
+
+def _create_site_from_telegram(
+    db,
+    *,
+    prompt: str,
+    external_id: str,
+    display_name: str,
+) -> tuple[str, dict | None]:
+    request_prompt = prompt.strip()
+    if not request_prompt:
+        return ("Укажите запрос: /create_site сайт для AI Office", None)
+    project_slug = _find_project_slug_for_text(db, request_prompt, external_id=external_id)
+    service = ArtifactGenerationService(db)
+    site = service.create_site(
+        prompt=request_prompt,
+        user_external_id=external_id,
+        project_slug=project_slug or "",
+    )
+    ProfileMemoryService(db).remember_fact(
+        external_id=external_id,
+        display_name=display_name,
+        text=f"Создан сайт {site.site_id} по запросу: {request_prompt}",
+        project_slug=project_slug,
+    )
+    link = f"{get_settings().app_base_url.rstrip('/')}{site.public_path}"
+    return (
+        f"[Developer] Готово. Я создал сайт.\n"
+        f"Site id: {site.site_id}\n"
+        f"Тип: {site.site_type}\n"
+        f"Ссылка: {link}",
+        None,
+    )
+
+
+def _create_tool_from_telegram(
+    db,
+    *,
+    prompt: str,
+    external_id: str,
+    display_name: str,
+) -> tuple[str, dict | None]:
+    request_prompt = prompt.strip()
+    if not request_prompt:
+        return ("Укажите запрос: /create_tool калькулятор стоимости AI Office", None)
+    project_slug = _find_project_slug_for_text(db, request_prompt, external_id=external_id)
+    service = ArtifactGenerationService(db)
+    tool = service.create_tool(
+        prompt=request_prompt,
+        user_external_id=external_id,
+        project_slug=project_slug or "",
+    )
+    ProfileMemoryService(db).remember_fact(
+        external_id=external_id,
+        display_name=display_name,
+        text=f"Создан инструмент {tool.tool_id} по запросу: {request_prompt}",
+        project_slug=project_slug,
+    )
+    link = f"{get_settings().app_base_url.rstrip('/')}{tool.public_path}"
+    return (
+        f"[Developer] Готово. Я создал инструмент.\n"
+        f"Tool id: {tool.tool_id}\n"
+        f"Тип: {tool.tool_type}\n"
+        f"Ссылка: {link}",
+        None,
+    )
+
+
+def _create_github_issue_approval_from_telegram(
+    db,
+    *,
+    request_text: str,
+    external_id: str,
+) -> tuple[str, dict | None]:
+    title = request_text.strip()
+    if not title:
+        title = "Создай GitHub issue с задачами на завтра"
+    task = TaskService(db).create_task(
+        TaskCreate(
+            title=title[:180],
+            input_text=title,
+            description=title,
+            created_by="user",
+            assigned_agent="developer",
+            status="waiting_approval",
+            requires_approval=True,
+            risk_level="medium",
+        )
+    )
+    result = ToolExecutionService(db).call_tool(
+        "github.issue.create",
+        {
+            "title": "AI Office demo follow-up",
+            "body": request_text,
+        },
+        ToolContext(task_id=task.id, workspace_id="default", agent_name="developer", actor_id=external_id),
+    )
+    if not result.requires_approval or not result.approval_id:
+        return ("GitHub action prepared without approval queue.", None)
+    approval_id = int(result.approval_id)
+    return (
+        f"[PMO] Подготовил GitHub issue в dry-run.\n"
+        f"Нужен approval #{approval_id}.\n"
+        f"Approve: /approve {approval_id}\n"
+        f"Reject: /reject {approval_id}",
+        approval_inline_keyboard(approval_id),
+    )
+
+
+async def _handle_telegram_product_flow(
+    *,
+    text: str,
+    chat_id: str | int,
+    message_id: int | None,
+    source_thread_id: int | None,
+    default_agent_id: str,
+    external_id: str,
+    display_name: str,
+) -> bool:
+    lowered = text.strip().lower()
+    if not lowered:
+        return False
+
+    if not any(
+        marker in lowered
+        for marker in [
+            "запомни:",
+            "что ты обо мне помнишь",
+            "что ты знаешь про",
+            "что у нас по проекту",
+            "что ты сам предлагаешь",
+            "какие задачи ты сам предлагаешь",
+            "создай сайт",
+            "создай калькулятор",
+            "создай инструмент",
+            "создай tool",
+            "создай github issue",
+        ]
+    ):
+        return False
+
+    response_text = ""
+    reply_markup = None
+    try:
+        if should_auto_create_tables():
+            init_db()
+        with get_session() as db:
+            memory = ProfileMemoryService(db)
+            goals = GoalEngineService(db)
+            if lowered.startswith("запомни:"):
+                fact = text.split(":", 1)[1].strip()
+                project_slug = _find_project_slug_for_text(db, fact, external_id=external_id)
+                memory.remember_fact(
+                    external_id=external_id,
+                    display_name=display_name,
+                    text=fact,
+                    project_slug=project_slug,
+                )
+                response_text = f"[Memory] Запомнил.\n{fact}"
+            elif "что ты обо мне помнишь" in lowered:
+                response_text = memory.memory_summary(external_id=external_id)
+            elif "что ты знаешь про" in lowered:
+                project_slug = _find_project_slug_for_text(db, text, external_id=external_id)
+                if project_slug:
+                    response_text = memory.project_summary(project_slug=project_slug)
+                else:
+                    response_text = memory.memory_summary(external_id=external_id)
+            elif "что у нас по проекту" in lowered:
+                project_slug = _find_project_slug_for_text(db, text, external_id=external_id)
+                response_text = _format_telegram_project(db, slug=project_slug or "")
+            elif "что ты сам предлагаешь" in lowered or "какие задачи ты сам предлагаешь" in lowered:
+                response_text = goals.suggest_tasks_text(external_id=external_id)
+            elif lowered.startswith("создай сайт"):
+                response_text, reply_markup = _create_site_from_telegram(
+                    db,
+                    prompt=text,
+                    external_id=external_id,
+                    display_name=display_name,
+                )
+            elif any(marker in lowered for marker in ["создай калькулятор", "создай инструмент", "создай tool"]):
+                response_text, reply_markup = _create_tool_from_telegram(
+                    db,
+                    prompt=text,
+                    external_id=external_id,
+                    display_name=display_name,
+                )
+            elif "создай github issue" in lowered:
+                response_text, reply_markup = _create_github_issue_approval_from_telegram(
+                    db,
+                    request_text=text,
+                    external_id=external_id,
+                )
+    except Exception as error:
+        logger.error("telegram.product_flow.error", error=str(error), exc_info=True)
+        response_text = f"Команда не выполнена: {format_error(error)}"
+
+    await send_telegram_message_to(
+        chat_id,
+        response_text,
+        agent_id=default_agent_id,
+        reply_to_message_id=message_id,
+        message_thread_id=source_thread_id,
+        reply_markup=reply_markup,
+    )
+    return True
 
 
 async def _run_telegram_single_agent(
@@ -1075,35 +1511,95 @@ async def _handle_telegram_runtime_command(
     message_id: int | None,
     source_thread_id: int | None,
     default_agent_id: str,
+    external_id: str = "telegram-user",
+    display_name: str = "",
 ) -> bool:
     """Handle Telegram-first task/autonomy commands."""
     if command not in {
+        "status",
         "tasks",
         "plan",
+        "daily_plan",
         "project",
         "projects",
+        "goals",
+        "goal_status",
+        "add_goal",
+        "memory",
+        "create_site",
+        "create_tool",
+        "brain_status",
+        "change_brain",
         "approve",
         "reject",
         "autonomy",
+        "autonomy_on",
+        "autonomy_off",
     }:
         return False
 
+    reply_markup = None
     try:
-        init_db()
+        if should_auto_create_tables():
+            init_db()
         with get_session() as db:
-            if command == "tasks":
+            if command == "status":
+                text = _status_summary_text(db, external_id=external_id)
+            elif command == "tasks":
                 text = _format_telegram_tasks(db, mode=body.strip().lower())
             elif command == "projects":
                 text = _format_telegram_projects(db)
             elif command == "project":
-                text = _format_telegram_project(db, slug=body.strip())
+                slug = body.strip() or (_find_project_slug_for_text(db, body, external_id=external_id) or "")
+                text = _format_telegram_project(db, slug=slug)
             elif command == "plan":
                 result = await AutonomyService(db).daily_plan(notify=False)
                 text = result.summary
+            elif command == "daily_plan":
+                text = GoalEngineService(db).daily_plan_text(external_id=external_id)
+            elif command in {"goals", "goal_status"}:
+                text = _format_telegram_goals(db, external_id=external_id)
+            elif command == "add_goal":
+                text = _create_goal_from_telegram(
+                    db,
+                    external_id=external_id,
+                    display_name=display_name,
+                    goal_text=body,
+                )
+            elif command == "memory":
+                project_slug = _find_project_slug_for_text(db, body, external_id=external_id) if body.strip() else None
+                memory = ProfileMemoryService(db)
+                text = (
+                    memory.project_summary(project_slug=project_slug)
+                    if project_slug
+                    else memory.memory_summary(external_id=external_id)
+                )
+            elif command == "create_site":
+                text, reply_markup = _create_site_from_telegram(
+                    db,
+                    prompt=body,
+                    external_id=external_id,
+                    display_name=display_name,
+                )
+            elif command == "create_tool":
+                text, reply_markup = _create_tool_from_telegram(
+                    db,
+                    prompt=body,
+                    external_id=external_id,
+                    display_name=display_name,
+                )
+            elif command == "brain_status":
+                text = _brain_status_text()
+            elif command == "change_brain":
+                text = _handle_change_brain_command(db, external_id=external_id, body=body)
             elif command == "approve":
                 text = _decide_telegram_approval(db, body, approve=True)
             elif command == "reject":
                 text = _decide_telegram_approval(db, body, approve=False)
+            elif command == "autonomy_on":
+                text = _handle_telegram_autonomy_command(db, "on")
+            elif command == "autonomy_off":
+                text = _handle_telegram_autonomy_command(db, "off")
             else:
                 text = _handle_telegram_autonomy_command(db, body)
     except Exception as error:
@@ -1116,6 +1612,7 @@ async def _handle_telegram_runtime_command(
         agent_id=default_agent_id,
         reply_to_message_id=message_id,
         message_thread_id=source_thread_id,
+        reply_markup=reply_markup,
     )
     return True
 
@@ -1159,7 +1656,10 @@ def _format_telegram_tasks(db, *, mode: str = "") -> str:
 
 def _format_telegram_project(db, *, slug: str) -> str:
     if not slug:
-        return "Укажите проект: /project ai-office"
+        projects = ProjectService(db).list_projects()
+        if not projects:
+            return "Проектов пока нет. Создайте цель через /add_goal или запустите /plan."
+        slug = projects[0].slug
     project_service = ProjectService(db)
     project = project_service.get_project_by_slug(slug)
     if not project:
@@ -1268,7 +1768,8 @@ async def _handle_telegram_callback_query(
     if chat_id is None or not raw_approval_id.isdigit():
         return True
 
-    init_db()
+    if should_auto_create_tables():
+        init_db()
     with get_session() as db:
         text = _decide_telegram_approval(
             db,
@@ -1310,6 +1811,7 @@ async def process_telegram_update(
     chat_id = chat.get("id")
     message_id = message.get("message_id")
     source_thread_id = _telegram_message_thread_id(message)
+    external_id, display_name = _telegram_user_identity(message)
     if chat_id is None:
         return
 
@@ -1321,6 +1823,19 @@ async def process_telegram_update(
         message_id=message_id if isinstance(message_id, int) else None,
         source_thread_id=source_thread_id,
         default_agent_id=default_agent_id,
+        external_id=external_id,
+        display_name=display_name,
+    ):
+        return
+
+    if await _handle_telegram_product_flow(
+        text=text,
+        chat_id=chat_id,
+        message_id=message_id if isinstance(message_id, int) else None,
+        source_thread_id=source_thread_id,
+        default_agent_id=default_agent_id,
+        external_id=external_id,
+        display_name=display_name,
     ):
         return
 
@@ -1498,25 +2013,40 @@ async def autonomy_cron_tick(request: Request):
             "autonomy_enabled": False,
         }
 
-    init_db()
-    with get_session() as db:
-        service = AutonomyService(db)
-        poll_result = await service.poll_queued_tasks(notify=True)
+    if should_auto_create_tables():
+        init_db()
+    try:
+        with get_session() as db:
+            audit_log(
+                db,
+                workspace_id="default",
+                actor_type="system",
+                actor_id="cron",
+                action="cron.autonomy_tick_requested",
+                object_type="scheduler",
+                object_id="autonomy_tick",
+                metadata={"source": "http", "secret_present": bool(expected)},
+                commit=True,
+            )
+    except Exception as error:
+        logger.warning("cron.audit.failed", error=format_error(error))
 
-        tz = ZoneInfo(settings.autonomy_timezone)
-        now = datetime.now(tz)
-        daily_plan = None
-        evening_review = None
-        if now.hour == settings.autonomy_daily_plan_hour:
-            daily_plan = (await service.daily_plan(notify=True)).model_dump()
-        if now.hour == settings.autonomy_evening_review_hour:
-            evening_review = await service.evening_review(notify=True)
+    tz = ZoneInfo(settings.autonomy_timezone)
+    now = datetime.now(tz)
+    job_results = await autonomy_scheduler.tick_once(
+        notify=True,
+        now=now.astimezone(timezone.utc),
+    )
+    results_by_job = {item.job_key: item for item in job_results}
+    poll_result = (results_by_job.get("autonomous_tick") or type("Result", (), {"result_json": None})()).result_json
+    daily_plan = (results_by_job.get("daily_plan") or type("Result", (), {"result_json": None})()).result_json
+    evening_review = (results_by_job.get("evening_review") or type("Result", (), {"result_json": None})()).result_json
 
     return {
         "status": "ok",
         "autonomy_enabled": True,
         "now": now.isoformat(timespec="seconds"),
-        "poll": poll_result,
+        "poll": poll_result or {"completed": [], "waiting_approval": [], "failed": []},
         "daily_plan": daily_plan,
         "evening_review": evening_review,
     }
@@ -1547,6 +2077,10 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
     open_tasks: list[dict[str, object]] = []
     recent_tasks: list[dict[str, object]] = []
     pending_approvals: list[dict[str, object]] = []
+    goals: list[dict[str, object]] = []
+    sites: list[dict[str, object]] = []
+    tools: list[dict[str, object]] = []
+    recent_memory: list[dict[str, object]] = []
     db_error = ""
 
     if database_ok:
@@ -1602,6 +2136,42 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
                     }
                     for approval in approval_service.list_approvals(status="pending")[:8]
                 ]
+                goals = [
+                    {
+                        "id": goal.id,
+                        "title": goal.title,
+                        "status": goal.status,
+                        "autonomy_enabled": goal.autonomy_enabled,
+                        "plan_preview": [step.get("title", "Следующий шаг") for step in (goal.plan_json or [])[:3]],
+                    }
+                    for goal in db.scalars(select(Goal).order_by(Goal.updated_at.desc()).limit(6))
+                ]
+                sites = [
+                    {
+                        "site_id": site.site_id,
+                        "title": site.title,
+                        "site_type": site.site_type,
+                        "public_path": site.public_path,
+                    }
+                    for site in db.scalars(select(GeneratedSite).order_by(GeneratedSite.created_at.desc()).limit(6))
+                ]
+                tools = [
+                    {
+                        "tool_id": tool.tool_id,
+                        "title": tool.title,
+                        "tool_type": tool.tool_type,
+                        "public_path": tool.public_path,
+                    }
+                    for tool in db.scalars(select(GeneratedTool).order_by(GeneratedTool.created_at.desc()).limit(6))
+                ]
+                recent_memory = [
+                    {
+                        "kind": memory.kind,
+                        "content": memory.content[:180],
+                        "created_at": memory.created_at.strftime("%Y-%m-%d %H:%M"),
+                    }
+                    for memory in db.scalars(select(Memory).order_by(Memory.created_at.desc()).limit(6))
+                ]
         except Exception as error:
             db_error = format_error(error)
 
@@ -1610,11 +2180,19 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
     approval_counts.setdefault("pending", 0)
 
     telegram_commands = [
+        "/status",
+        "/add_goal",
+        "/goals",
         "/tasks",
         "/tasks today",
+        "/daily_plan",
         "/plan",
+        "/memory",
         "/projects",
         "/project ai-office",
+        "/create_site",
+        "/create_tool",
+        "/brain_status",
         "/approve <id>",
         "/reject <id>",
         "/autonomy status",
@@ -1633,6 +2211,10 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
         "open_tasks": open_tasks,
         "recent_tasks": recent_tasks,
         "pending_approvals": pending_approvals,
+        "goals": goals,
+        "sites": sites,
+        "tools": tools,
+        "recent_memory": recent_memory,
         "telegram_commands": telegram_commands,
         "poll_interval_seconds": settings.autonomy_poll_interval_seconds,
         "daily_plan_hour": settings.autonomy_daily_plan_hour,
@@ -1646,11 +2228,17 @@ def _build_dashboard_context(agents_list: list[dict[str, str]], settings) -> dic
             "Anthropic": bool(settings.anthropic_api_key.strip()),
             "Google": bool(settings.google_api_key.strip()),
         },
+        "brain_status": {
+            "provider": settings.brain_provider,
+            "cheap_model": settings.brain_cheap_model,
+            "strong_model": settings.brain_strong_model,
+            "code_model": settings.brain_code_model,
+        },
     }
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def index(request: Request, _: None = Depends(require_admin)):
     """Read-only operating dashboard. Agent work stays in Telegram/API."""
     agents_list = [
         {"id": "pmo", "name": "PMO", "role": "Оркестратор задач"},
@@ -1668,6 +2256,237 @@ async def index(request: Request):
         name="index.html",
         context=dashboard,
     )
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request, _: None = Depends(require_admin)):
+    return await index(request)
+
+
+@app.get("/agents")
+async def agents_page(_: None = Depends(require_admin)) -> HTMLResponse:
+    dashboard = _build_dashboard_context(
+        [
+            {"id": "pmo", "name": "PMO", "role": "Оркестратор задач"},
+            {"id": "data_analyst", "name": "Аналитик", "role": "Данные и метрики"},
+            {"id": "developer", "name": "Разработчик", "role": "Код и артефакты"},
+            {"id": "copywriter", "name": "Копирайтер", "role": "Контент и документы"},
+            {"id": "support", "name": "Поддержка", "role": "Knowledge ответы"},
+            {"id": "strategist", "name": "Стратег", "role": "Рынок и roadmap"},
+            {"id": "accountant", "name": "Бухгалтер", "role": "Финансы и документы"},
+        ],
+        get_settings(),
+    )
+    body = "<div class='grid cards'>"
+    for agent in dashboard["agents"]:
+        body += (
+            "<div class='card'>"
+            f"<div class='pill'>{html.escape(agent['status'])}</div>"
+            f"<h3>{html.escape(agent['name'])}</h3>"
+            f"<p>{html.escape(agent['role'])}</p>"
+            f"<p class='muted'>{html.escape(agent['message'])}</p>"
+            "</div>"
+        )
+    body += "</div>"
+    return _product_page("Agents", body, subtitle="Живой список сотрудников и их последнего статуса.")
+
+
+@app.get("/goals")
+async def goals_page(_: None = Depends(require_admin)) -> HTMLResponse:
+    with get_session() as db:
+        goals = list(db.scalars(select(Goal).order_by(Goal.updated_at.desc()).limit(50)))
+    if not goals:
+        body = "<div class='panel'>Целей пока нет. Добавьте первую через Telegram: <code>/add_goal Подготовить AI Office к демонстрации</code>.</div>"
+        return _product_page("Goals", body, subtitle="Goal engine и автономный backlog.")
+
+    body = "<div class='list'>"
+    for goal in goals:
+        plan_preview = "".join(
+            f"<p>{index}. {html.escape(step.get('title', 'Следующий шаг'))}</p>"
+            for index, step in enumerate((goal.plan_json or [])[:5], start=1)
+        )
+        body += (
+            "<div class='row'>"
+            f"<strong>#{goal.id} {html.escape(goal.title)}</strong>"
+            f"<p>{html.escape(goal.status)} · autonomy {'on' if goal.autonomy_enabled else 'off'}</p>"
+            f"{plan_preview or '<p>План пока пуст.</p>'}"
+            "</div>"
+        )
+    body += "</div>"
+    return _product_page("Goals", body, subtitle="Цели пользователя и предложенные системой шаги.")
+
+
+@app.get("/tasks", response_class=HTMLResponse)
+async def tasks_page(_: None = Depends(require_admin)) -> HTMLResponse:
+    with get_session() as db:
+        tasks = TaskService(db).list_tasks()[:100]
+    rows = "".join(
+        "<tr>"
+        f"<td>#{task.id}</td>"
+        f"<td>{html.escape(task.title)}</td>"
+        f"<td>{html.escape(task.status)}</td>"
+        f"<td>{html.escape(task.assigned_agent)}</td>"
+        f"<td>{html.escape(task.project.slug if task.project else 'none')}</td>"
+        f"<td>{task.updated_at.strftime('%Y-%m-%d %H:%M')}</td>"
+        "</tr>"
+        for task in tasks
+    )
+    body = (
+        "<div class='panel'><table><thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Agent</th><th>Project</th><th>Updated</th></tr></thead>"
+        f"<tbody>{rows or '<tr><td colspan=6>Задач пока нет.</td></tr>'}</tbody></table></div>"
+    )
+    return _product_page("Tasks", body, subtitle="Общая очередь работы и execution history.")
+
+
+@app.get("/sites", response_class=HTMLResponse)
+async def sites_page(_: None = Depends(require_admin)) -> HTMLResponse:
+    with get_session() as db:
+        sites = ArtifactGenerationService(db).list_sites()
+    if not sites:
+        body = "<div class='panel'>Сайтов пока нет. Создайте через <code>/create_site сайт для AI Office</code>.</div>"
+        return _product_page("Sites", body, subtitle="Сгенерированные сайты, доступные прямо из браузера.")
+    body = "<div class='list'>"
+    for site in sites:
+        body += (
+            "<div class='row'>"
+            f"<strong>{html.escape(site.title)}</strong>"
+            f"<p>{html.escape(site.site_id)} · {html.escape(site.site_type)}</p>"
+            f"<p><a href='{html.escape(site.public_path)}'>{html.escape(site.public_path)}</a></p>"
+            "</div>"
+        )
+    body += "</div>"
+    return _product_page("Sites", body, subtitle="Generated sites stored under generated_sites/.")
+
+
+@app.get("/tools", response_class=HTMLResponse)
+async def tools_page(_: None = Depends(require_admin)) -> HTMLResponse:
+    with get_session() as db:
+        tools = ArtifactGenerationService(db).list_tools()
+    if not tools:
+        body = "<div class='panel'>Инструментов пока нет. Создайте через <code>/create_tool калькулятор стоимости AI Office</code>.</div>"
+        return _product_page("Tools", body, subtitle="Интерактивные инструменты для демо и продаж.")
+    body = "<div class='list'>"
+    for tool in tools:
+        body += (
+            "<div class='row'>"
+            f"<strong>{html.escape(tool.title)}</strong>"
+            f"<p>{html.escape(tool.tool_id)} · {html.escape(tool.tool_type)}</p>"
+            f"<p><a href='{html.escape(tool.public_path)}'>{html.escape(tool.public_path)}</a></p>"
+            "</div>"
+        )
+    body += "</div>"
+    return _product_page("Tools", body, subtitle="Generated tools stored under generated_tools/.")
+
+
+@app.get("/memory", response_class=HTMLResponse)
+async def memory_page(_: None = Depends(require_admin)) -> HTMLResponse:
+    with get_session() as db:
+        profiles = list(db.scalars(select(UserProfile).order_by(UserProfile.updated_at.desc()).limit(10)))
+        memories = list(db.scalars(select(Memory).order_by(Memory.created_at.desc()).limit(40)))
+    body = "<div class='grid cards'>"
+    for profile in profiles:
+        body += (
+            "<div class='card'>"
+            f"<h3>{html.escape(profile.display_name or profile.external_id)}</h3>"
+            f"<p>external_id: {html.escape(profile.external_id)}</p>"
+            f"<p class='muted'>primary project: {html.escape(profile.primary_project_slug or 'not set')}</p>"
+            f"<p class='muted'>style: {html.escape(profile.communication_style or 'not set')}</p>"
+            "</div>"
+        )
+    body += "</div>"
+    body += "<div class='panel'><h3>Recent Memory</h3><div class='list'>"
+    for memory in memories:
+        body += (
+            "<div class='row'>"
+            f"<strong>{html.escape(memory.kind)}</strong>"
+            f"<p>{html.escape(memory.content)}</p>"
+            f"<p>{memory.created_at.strftime('%Y-%m-%d %H:%M')}</p>"
+            "</div>"
+        )
+    body += "</div></div>"
+    return _product_page("Memory", body, subtitle="Профили пользователя, стиль общения и project memory.")
+
+
+@app.get("/landing", response_class=HTMLResponse)
+async def landing_page() -> HTMLResponse:
+    body = (
+        "<div class='panel'>"
+        "<div class='grid cards'>"
+        "<div class='card'><h3>AI Office 24/7</h3><p>Telegram-first AI office with goals, memory, approvals and autonomous planning.</p></div>"
+        "<div class='card'><h3>Как работает</h3><p>Пользователь пишет в Telegram, PMO маршрутизирует работу, Developer создает сайты/tools, Support отвечает по knowledge, Memory хранит контекст.</p></div>"
+        "<div class='card'><h3>Demo flow</h3><p>Добавить цель → получить backlog → создать сайт → создать калькулятор → одобрить GitHub action.</p></div>"
+        "</div></div>"
+        "<div class='panel'><h3>Ключевые возможности</h3><div class='list'>"
+        "<div class='row'><strong>Telegram Product Bot</strong><p>Обычный чат, команды, inline approve/reject, ответы по ролям.</p></div>"
+        "<div class='row'><strong>Goal Engine</strong><p>Цели, дневной план, автономные next steps, task backlog.</p></div>"
+        "<div class='row'><strong>Generated Sites & Tools</strong><p>Готовые HTML/CSS/JS артефакты по команде из Telegram.</p></div>"
+        "<div class='row'><strong>Bring Your Own Brain</strong><p>Конфигурируемые BRAIN_* provider/model settings для демо и пилота.</p></div>"
+        "</div></div>"
+        "<div class='panel'><p><a href='/dashboard'>Open live dashboard</a> · <a href='/sites'>Browse generated sites</a> · <a href='/tools'>Browse generated tools</a></p></div>"
+    )
+    return _product_page("AI Office 24/7", body, subtitle="Демонстрационный landing page продукта внутри самого репозитория.")
+
+
+def _resolve_artifact_path(base_directory: str, asset_path: str) -> Path | None:
+    base = Path(base_directory).resolve()
+    target = (base / asset_path).resolve()
+    if target != base and base not in target.parents:
+        return None
+    if not target.exists() or not target.is_file():
+        return None
+    return target
+
+
+@app.get("/sites/{site_id}")
+async def site_entry(site_id: str):
+    return RedirectResponse(url=f"/sites/{site_id}/", status_code=307)
+
+
+@app.get("/sites/{site_id}/")
+async def site_index(site_id: str):
+    with get_session() as db:
+        site = ArtifactGenerationService(db).get_site(site_id)
+    if not site:
+        return HTMLResponse("Site not found", status_code=404)
+    return FileResponse(Path(site.directory_path) / "index.html")
+
+
+@app.get("/sites/{site_id}/{asset_path:path}")
+async def site_asset(site_id: str, asset_path: str):
+    with get_session() as db:
+        site = ArtifactGenerationService(db).get_site(site_id)
+    if not site:
+        return HTMLResponse("Site not found", status_code=404)
+    asset = _resolve_artifact_path(site.directory_path, asset_path)
+    if not asset:
+        return HTMLResponse("Asset not found", status_code=404)
+    return FileResponse(asset)
+
+
+@app.get("/tools/{tool_id}")
+async def tool_entry(tool_id: str):
+    return RedirectResponse(url=f"/tools/{tool_id}/", status_code=307)
+
+
+@app.get("/tools/{tool_id}/")
+async def tool_index(tool_id: str):
+    with get_session() as db:
+        tool = ArtifactGenerationService(db).get_tool(tool_id)
+    if not tool:
+        return HTMLResponse("Tool not found", status_code=404)
+    return FileResponse(Path(tool.directory_path) / "index.html")
+
+
+@app.get("/tools/{tool_id}/{asset_path:path}")
+async def tool_asset(tool_id: str, asset_path: str):
+    with get_session() as db:
+        tool = ArtifactGenerationService(db).get_tool(tool_id)
+    if not tool:
+        return HTMLResponse("Tool not found", status_code=404)
+    asset = _resolve_artifact_path(tool.directory_path, asset_path)
+    if not asset:
+        return HTMLResponse("Asset not found", status_code=404)
+    return FileResponse(asset)
 
 
 @app.get("/simulator", response_class=HTMLResponse)
@@ -1710,7 +2529,7 @@ async def agent_statuses(_: None = Depends(require_api_key)):
 
 
 @app.post("/api/telegram/notify")
-async def telegram_notify(request: Request, _: None = Depends(require_api_key)):
+async def telegram_notify(request: Request, _: None = Depends(require_admin)):
     """Send a Telegram notification from UI-only flows such as the simulator."""
     data = await request.json()
     task = data.get("task", "").strip() or "Симулятор AI Office"

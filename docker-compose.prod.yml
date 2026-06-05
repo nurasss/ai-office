@@ -1,0 +1,164 @@
+name: ai-office
+
+x-app-env: &app_env
+  ENVIRONMENT: ${ENVIRONMENT:-staging}
+  APP_ENV: ${APP_ENV:-staging}
+  APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8000}
+  FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8000}
+  AI_OFFICE_REQUIRE_API_KEY: ${AI_OFFICE_REQUIRE_API_KEY:-true}
+  AI_OFFICE_API_KEY: ${AI_OFFICE_API_KEY:-}
+  AI_OFFICE_ADMIN_TOKEN: ${AI_OFFICE_ADMIN_TOKEN:-}
+  AI_OFFICE_ALLOWED_ORIGINS: ${AI_OFFICE_ALLOWED_ORIGINS:-http://localhost:8000}
+  CRON_SECRET: ${CRON_SECRET:-}
+  DATABASE_URL: postgresql+psycopg2://ai_office:${POSTGRES_PASSWORD:-}@postgres:5432/ai_office
+  REDIS_URL: redis://redis:6379/0
+  WORKER_BACKEND: redis
+  RQ_QUEUE_NAME: ${RQ_QUEUE_NAME:-ai_office_tasks}
+  VECTOR_BACKEND: pgvector
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fake}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-fake-embedding}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+  MODEL_PROVIDER_PRIMARY: ${MODEL_PROVIDER_PRIMARY:-fake}
+  MODEL_PROVIDER_FALLBACK: ${MODEL_PROVIDER_FALLBACK:-fake}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+  ALLOWED_TELEGRAM_USER_IDS: ${ALLOWED_TELEGRAM_USER_IDS:-}
+  ALLOWED_TELEGRAM_CHAT_IDS: ${ALLOWED_TELEGRAM_CHAT_IDS:-}
+  ENABLE_REAL_TOOLS: ${ENABLE_REAL_TOOLS:-false}
+  ENABLE_APPROVAL_REQUIRED: ${ENABLE_APPROVAL_REQUIRED:-true}
+  ENABLE_PII_REDACTION: ${ENABLE_PII_REDACTION:-true}
+  ENABLE_COST_TRACKING: ${ENABLE_COST_TRACKING:-true}
+  ENABLE_RAG_CITATIONS: ${ENABLE_RAG_CITATIONS:-true}
+  AUTONOMY_ENABLED: ${AUTONOMY_ENABLED:-false}
+
+x-app-base: &app_base
+  build: .
+  restart: unless-stopped
+  environment:
+    <<: *app_env
+  volumes:
+    - ai_office_data:/app/data
+    - ai_office_generated_sites:/app/generated_sites
+    - ai_office_generated_tools:/app/generated_tools
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  migrate:
+    <<: *app_base
+    command: alembic upgrade head
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
+  api:
+    <<: *app_base
+    command: python run.py
+    ports:
+      - "${AI_OFFICE_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5).read()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *app_base
+    command: python -m workers.rq_worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from core.config import get_settings; assert get_settings().worker_backend == 'redis'\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  scheduler:
+    <<: *app_base
+    command: python -m workers.scheduler_runner
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from core.config import get_settings; assert get_settings().worker_backend == 'redis'\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  telegram-bot:
+    <<: *app_base
+    command: python -m workers.telegram_bot
+    profiles: ["telegram"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from core.config import get_settings; assert get_settings().app_base_url\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ai_office
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ai_office
+    volumes:
+      - ai_office_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_office -d ai_office"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ai_office_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  ai_office_postgres:
+  ai_office_redis:
+  ai_office_data:
+  ai_office_generated_sites:
+  ai_office_generated_tools:

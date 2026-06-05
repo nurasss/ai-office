@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from core.auth import require_api_key, require_permission
+from core.auth import require_admin_or_permission, require_api_key
 from core.config import get_settings
 from core.db import database_connected, get_db, redis_connected
 from core.models import KnowledgeDocument, ModelUsage, TaskRun
@@ -31,13 +31,12 @@ from core.schemas import (
 from services.audit_service import list_audit_events
 from services.approval_service import ApprovalService, ApprovalStateError
 from services.autonomy_service import AutonomyService, get_autonomy_enabled
+from services.knowledge_service import KnowledgeService
 from services.project_service import ProjectService
 from services.scheduler import autonomy_scheduler
 from services.task_service import TaskService
 from tools.external.telegram import telegram_runtime_configured
 from workers.rq_queue import enqueue_task_rq
-from rag.ingestion import ingest_text
-from rag.retrieval import retrieve_context
 
 router = APIRouter(
     prefix="/api",
@@ -162,7 +161,7 @@ async def list_task_events(task_id: int, db: Session = Depends(get_db)):
 @router.get("/approvals", response_model=list[ApprovalRead])
 async def list_approvals(
     status: str | None = Query(default=None),
-    _permission: None = Depends(require_permission("approval:read")),
+    _permission: None = Depends(require_admin_or_permission("approval:read")),
     db: Session = Depends(get_db),
 ):
     return ApprovalService(db).list_approvals(status=status)
@@ -171,7 +170,7 @@ async def list_approvals(
 @router.get("/approvals/{approval_id}", response_model=ApprovalRead)
 async def get_approval(
     approval_id: int,
-    _permission: None = Depends(require_permission("approval:read")),
+    _permission: None = Depends(require_admin_or_permission("approval:read")),
     db: Session = Depends(get_db),
 ):
     approval = ApprovalService(db).get_approval(approval_id)
@@ -184,7 +183,7 @@ async def get_approval(
 async def approve_approval(
     approval_id: int,
     payload: ApprovalDecision | None = None,
-    _permission: None = Depends(require_permission("approval:decide")),
+    _permission: None = Depends(require_admin_or_permission("approval:decide")),
     db: Session = Depends(get_db),
 ):
     payload = payload or ApprovalDecision()
@@ -205,7 +204,7 @@ async def approve_approval(
 async def reject_approval(
     approval_id: int,
     payload: ApprovalDecision | None = None,
-    _permission: None = Depends(require_permission("approval:decide")),
+    _permission: None = Depends(require_admin_or_permission("approval:decide")),
     db: Session = Depends(get_db),
 ):
     payload = payload or ApprovalDecision()
@@ -284,14 +283,17 @@ async def list_audit(
     workspace_id: str | None = Query(default=None),
     task_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
-    _permission: None = Depends(require_permission("audit:read")),
+    _permission: None = Depends(require_admin_or_permission("audit:read")),
     db: Session = Depends(get_db),
 ):
     return list_audit_events(db, workspace_id=workspace_id, task_id=task_id, limit=limit)
 
 
 @router.get("/metrics/summary")
-async def metrics_summary(db: Session = Depends(get_db)):
+async def metrics_summary(
+    _permission: None = Depends(require_admin_or_permission("cost:read")),
+    db: Session = Depends(get_db),
+):
     tasks_today = int(db.scalar(select(func.count()).select_from(TaskRun)) or 0)
     completed = int(db.scalar(select(func.count()).select_from(TaskRun).where(TaskRun.status == "completed")) or 0)
     failed = int(db.scalar(select(func.count()).select_from(TaskRun).where(TaskRun.status == "failed")) or 0)
@@ -313,7 +315,10 @@ async def metrics_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/costs/summary")
-async def costs_summary(db: Session = Depends(get_db)):
+async def costs_summary(
+    _permission: None = Depends(require_admin_or_permission("cost:read")),
+    db: Session = Depends(get_db),
+):
     total_cost = float(db.scalar(select(func.coalesce(func.sum(ModelUsage.cost_usd), 0.0))) or 0.0)
     total_input = int(db.scalar(select(func.coalesce(func.sum(ModelUsage.input_tokens), 0))) or 0)
     total_output = int(db.scalar(select(func.coalesce(func.sum(ModelUsage.output_tokens), 0))) or 0)
@@ -321,7 +326,10 @@ async def costs_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/costs/by-agent")
-async def costs_by_agent(db: Session = Depends(get_db)):
+async def costs_by_agent(
+    _permission: None = Depends(require_admin_or_permission("cost:read")),
+    db: Session = Depends(get_db),
+):
     rows = db.execute(
         select(ModelUsage.agent_run_id, func.coalesce(func.sum(ModelUsage.cost_usd), 0.0)).group_by(ModelUsage.agent_run_id)
     ).all()
@@ -329,7 +337,10 @@ async def costs_by_agent(db: Session = Depends(get_db)):
 
 
 @router.get("/costs/by-model")
-async def costs_by_model(db: Session = Depends(get_db)):
+async def costs_by_model(
+    _permission: None = Depends(require_admin_or_permission("cost:read")),
+    db: Session = Depends(get_db),
+):
     rows = db.execute(
         select(ModelUsage.provider, ModelUsage.model, func.coalesce(func.sum(ModelUsage.cost_usd), 0.0)).group_by(
             ModelUsage.provider, ModelUsage.model
@@ -339,9 +350,12 @@ async def costs_by_model(db: Session = Depends(get_db)):
 
 
 @router.post("/knowledge/upload")
-async def upload_knowledge(payload: KnowledgeUploadRequest, db: Session = Depends(get_db)):
-    return ingest_text(
-        db,
+async def upload_knowledge(
+    payload: KnowledgeUploadRequest,
+    _permission: None = Depends(require_admin_or_permission("knowledge:upload")),
+    db: Session = Depends(get_db),
+):
+    return KnowledgeService(db).ingest_text(
         workspace_id=payload.workspace_id,
         agent_namespace=payload.agent_namespace,
         title=payload.title,
@@ -355,13 +369,13 @@ async def upload_knowledge(payload: KnowledgeUploadRequest, db: Session = Depend
 async def list_knowledge_documents(
     workspace_id: str = Query(default="default"),
     agent_namespace: str | None = Query(default=None),
+    _permission: None = Depends(require_admin_or_permission("knowledge:read")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(KnowledgeDocument).where(KnowledgeDocument.workspace_id == workspace_id).order_by(
-        KnowledgeDocument.created_at.desc()
+    documents = KnowledgeService(db).list_documents(
+        workspace_id=workspace_id,
+        agent_namespace=agent_namespace,
     )
-    if agent_namespace:
-        stmt = stmt.where(KnowledgeDocument.agent_namespace == agent_namespace)
     return [
         {
             "id": document.id,
@@ -372,7 +386,7 @@ async def list_knowledge_documents(
             "version": document.version,
             "created_at": document.created_at.isoformat(),
         }
-        for document in db.scalars(stmt)
+        for document in documents
     ]
 
 
@@ -382,10 +396,10 @@ async def search_knowledge(
     agent_namespace: str = Query(default="agent_support"),
     workspace_id: str = Query(default="default"),
     top_k: int = Query(default=6, ge=1, le=20),
+    _permission: None = Depends(require_admin_or_permission("knowledge:read")),
     db: Session = Depends(get_db),
 ):
-    return retrieve_context(
-        db,
+    return KnowledgeService(db).search(
         query=query,
         agent_namespace=agent_namespace,
         workspace_id=workspace_id,
@@ -394,10 +408,16 @@ async def search_knowledge(
 
 
 @router.post("/autonomy/daily-plan", response_model=DailyPlanResponse)
-async def run_daily_plan(db: Session = Depends(get_db)):
+async def run_daily_plan(
+    _permission: None = Depends(require_admin_or_permission("integration:manage")),
+    db: Session = Depends(get_db),
+):
     return await AutonomyService(db).daily_plan(notify=True)
 
 
 @router.post("/autonomy/review")
-async def run_evening_review(db: Session = Depends(get_db)):
+async def run_evening_review(
+    _permission: None = Depends(require_admin_or_permission("integration:manage")),
+    db: Session = Depends(get_db),
+):
     return await AutonomyService(db).evening_review(notify=True)

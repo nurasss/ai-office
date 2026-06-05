@@ -13,7 +13,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from core.config import get_settings
+from core.config import Environment, get_settings
 from core.models import Base
 
 _engine: Engine | None = None
@@ -79,6 +79,11 @@ def init_db(engine: Engine | None = None) -> None:
     Base.metadata.create_all(bind=engine or get_engine())
 
 
+def should_auto_create_tables() -> bool:
+    """Return whether runtime code may create tables automatically."""
+    return get_settings().environment != Environment.PRODUCTION
+
+
 def reset_db_engine() -> None:
     """Dispose cached engine, mainly for tests that swap DATABASE_URL."""
     global _engine, _engine_url, _SessionLocal
@@ -99,7 +104,8 @@ def get_session() -> Session:
 
 def get_db() -> Iterator[Session]:
     """FastAPI dependency that yields a session."""
-    init_db()
+    if should_auto_create_tables():
+        init_db()
     db = get_session()
     try:
         yield db

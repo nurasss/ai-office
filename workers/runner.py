@@ -6,13 +6,15 @@ import time
 
 from sqlalchemy import select
 
-from core.db import get_session, init_db
+from core.db import get_session, init_db, should_auto_create_tables
 from core.models import Task
+from core.production import run_production_preflight
 from workers.tasks import execute_task
 
 
 def run_once() -> list[int]:
-    init_db()
+    if should_auto_create_tables():
+        init_db()
     processed: list[int] = []
     with get_session() as db:
         task_ids = list(
@@ -30,6 +32,7 @@ def run_once() -> list[int]:
 
 
 def main() -> None:
+    run_production_preflight(raise_on_error=True)
     print("AI Office worker started. Press Ctrl+C to stop.")
     while True:
         processed = run_once()

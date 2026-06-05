@@ -110,4 +110,67 @@ With the app running:
 
 ```bash
 bash scripts/pilot_smoke_test.sh
+./scripts/staging_smoke.sh
+python scripts/check_migrations.py
+python scripts/telegram_webhook_smoke.py
 ```
+
+## Production Preflight
+
+```bash
+python scripts/production_preflight.py
+python scripts/production_preflight.py --env-file .env.production.example --template-check
+```
+
+`ENVIRONMENT=production` fails fast for missing API/admin/cron secrets, SQLite,
+missing Redis, fake model or embedding providers, wildcard CORS, missing
+Telegram allowlists, and unsafe tool/autonomy combinations.
+
+## Admin Access
+
+Admin/dashboard pages and dangerous endpoints require:
+
+```text
+Authorization: Bearer <AI_OFFICE_ADMIN_TOKEN>
+```
+
+Use the public API key only for normal API clients:
+
+```text
+X-API-Key: <AI_OFFICE_API_KEY>
+```
+
+## Backup and Restore
+
+Backup:
+
+```bash
+docker compose -f docker-compose.prod.yml exec postgres \
+  pg_dump -U ai_office -d ai_office -Fc -f /tmp/ai_office.dump
+docker compose -f docker-compose.prod.yml cp postgres:/tmp/ai_office.dump ./ai_office.dump
+```
+
+Restore to a new database:
+
+```bash
+docker compose -f docker-compose.prod.yml cp ./ai_office.dump postgres:/tmp/ai_office.dump
+docker compose -f docker-compose.prod.yml exec postgres \
+  pg_restore -U ai_office -d ai_office --clean --if-exists /tmp/ai_office.dump
+```
+
+## Secret Rotation
+
+1. Generate a replacement secret.
+2. Update `.env.production` or the deployment secret store.
+3. Restart only affected services.
+4. Re-run `python scripts/production_preflight.py`.
+5. Revoke the old provider token.
+
+Rotate `AI_OFFICE_API_KEY`, `AI_OFFICE_ADMIN_TOKEN`, `CRON_SECRET`, Telegram,
+GitHub, Jira, Slack, and model provider keys independently.
+
+## Pilot KPIs
+
+Track task completion rate, stuck/failed tasks, approval latency, cost per task,
+Telegram response time, RAG citation coverage, and user satisfaction for the
+four-week pilot.
