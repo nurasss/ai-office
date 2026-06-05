@@ -8,6 +8,8 @@ from enum import Enum
 from typing import Any, Optional, Protocol
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_openai import ChatOpenAI
 
 from core.config import get_settings, load_agent_config
@@ -16,6 +18,53 @@ class Provider(str, Enum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     GOOGLE = "google"
+    FAKE = "fake"
+
+
+class DeterministicFakeChatModel(BaseChatModel):
+    """LangChain-compatible fake chat model for local no-key demo execution."""
+
+    model_name: str = "fake-local"
+    agent_id: str = "unknown"
+
+    @property
+    def _llm_type(self) -> str:
+        return "ai-office-fake"
+
+    def bind_tools(
+        self,
+        tools: Any,
+        *,
+        tool_choice: Optional[str] = None,
+        **kwargs: Any,
+    ) -> "DeterministicFakeChatModel":
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        prompt = self._summarize_messages(messages)
+        text = (
+            f"[fake:{self.model_name}:{self.agent_id}] Demo execution completed without external API calls.\n"
+            "1. Task was accepted and routed locally.\n"
+            "2. No provider credentials were required.\n"
+            "3. This deterministic response is only for development/demo mode.\n"
+            f"Context: {prompt}"
+        )
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
+
+    @staticmethod
+    def _summarize_messages(messages: list[BaseMessage]) -> str:
+        for message in reversed(messages):
+            content = message.content
+            if isinstance(content, str) and content.strip():
+                words = [word for word in content.split() if word.strip()]
+                return " ".join(words[:32])
+        return "no user content"
 
 class ModelPool:
     """Пул моделей с приоритетами: default (дешёвая), heavy (дорогая)."""
@@ -130,6 +179,8 @@ class LLMRouter:
 
     def _get_provider_key(self, provider: Provider) -> tuple[str, str]:
         """Вернуть API-ключ и имя переменной окружения для провайдера."""
+        if provider == Provider.FAKE:
+            return "", "MODEL_PROVIDER_PRIMARY"
         if provider == Provider.ANTHROPIC:
             return self._settings.anthropic_api_key.strip(), "ANTHROPIC_API_KEY"
         if provider == Provider.OPENAI:
@@ -140,6 +191,13 @@ class LLMRouter:
 
     def _get_agent_pool(self, agent_id: str) -> ModelPool:
         """Вернуть model pool из settings.yaml с fallback на встроенные значения."""
+        if self._settings.model_provider_primary.strip().lower() == Provider.FAKE.value:
+            return ModelPool(
+                provider=Provider.FAKE,
+                default_model="fake-local",
+                heavy_model="fake-local",
+            )
+
         agent_config = load_agent_config().get("agents", {}).get(agent_id, {})
         provider_value = agent_config.get("model_provider")
         default_model = agent_config.get("model_default")
@@ -196,7 +254,7 @@ class LLMRouter:
         model_name = (pool.heavy_model if use_heavy else pool.default_model).strip()
 
         api_key, env_var = self._get_provider_key(pool.provider)
-        if not api_key:
+        if pool.provider != Provider.FAKE and not api_key:
             raise MissingLLMCredentialsError(
                 agent_id=agent_id,
                 provider=pool.provider,
@@ -204,7 +262,12 @@ class LLMRouter:
             )
 
         model: BaseChatModel
-        if pool.provider == Provider.ANTHROPIC:
+        if pool.provider == Provider.FAKE:
+            model = DeterministicFakeChatModel(
+                model_name=model_name or "fake-local",
+                agent_id=agent_id,
+            )
+        elif pool.provider == Provider.ANTHROPIC:
             from langchain_anthropic import ChatAnthropic
 
             model = ChatAnthropic(
