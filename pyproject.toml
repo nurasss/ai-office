@@ -38,6 +38,17 @@ dev = [
   "mypy==1.13.0",
 ]
 
+[dependency-groups]
+dev = [
+  "pytest==8.3.5",
+  "pytest-asyncio==0.24.0",
+  "ruff==0.7.0",
+  "mypy==1.13.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"
