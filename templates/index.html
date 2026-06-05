@@ -95,6 +95,8 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            display: block;
+            text-decoration: none;
         }
 
         .content {
@@ -137,7 +139,7 @@
         }
 
         .stats {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         }
 
         .main-grid {
@@ -334,6 +336,20 @@
             </div>
 
             <div class="nav-block">
+                <div class="nav-title">Pages</div>
+                <div class="command-list">
+                    <a class="command" href="/dashboard">/dashboard</a>
+                    <a class="command" href="/agents">/agents</a>
+                    <a class="command" href="/goals">/goals</a>
+                    <a class="command" href="/tasks">/tasks</a>
+                    <a class="command" href="/sites">/sites</a>
+                    <a class="command" href="/tools">/tools</a>
+                    <a class="command" href="/memory">/memory</a>
+                    <a class="command" href="/landing">/landing</a>
+                </div>
+            </div>
+
+            <div class="nav-block">
                 <div class="nav-title">Telegram</div>
                 <div class="command-list">
                     {% for command in telegram_commands %}
@@ -382,6 +398,16 @@
                     <div class="stat-label">Проблемы</div>
                     <div class="stat-value">{{ task_counts.failed + task_counts.stuck }}</div>
                     <div class="stat-note">failed или stuck</div>
+                </article>
+                <article class="panel stat">
+                    <div class="stat-label">Активные цели</div>
+                    <div class="stat-value">{{ goals|length }}</div>
+                    <div class="stat-note">goal engine backlog</div>
+                </article>
+                <article class="panel stat">
+                    <div class="stat-label">Артефакты</div>
+                    <div class="stat-value">{{ sites|length + tools|length }}</div>
+                    <div class="stat-note">sites + tools</div>
                 </article>
             </section>
 
@@ -433,6 +459,35 @@
                             </div>
                             {% else %}
                             <div class="empty">Открытых задач нет.</div>
+                            {% endif %}
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Цели</h3>
+                            <span class="pill info">{{ goals|length }}</span>
+                        </div>
+                        <div class="panel-body">
+                            {% if goals %}
+                            <div class="task-list">
+                                {% for goal in goals %}
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#{{ goal.id }} {{ goal.title }}</div>
+                                            <div class="row-meta">autonomy {{ 'on' if goal.autonomy_enabled else 'off' }}</div>
+                                        </div>
+                                        <span class="pill {{ 'ok' if goal.status == 'active' else 'idle' }}">{{ goal.status }}</span>
+                                    </div>
+                                    {% for step in goal.plan_preview %}
+                                    <div class="row-meta">{{ loop.index }}. {{ step }}</div>
+                                    {% endfor %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="empty">Цели появятся после /add_goal.</div>
                             {% endif %}
                         </div>
                     </article>
@@ -509,6 +564,33 @@
 
                     <article class="panel">
                         <div class="panel-head">
+                            <h3>Созданные сайты и tools</h3>
+                            <span class="pill info">{{ sites|length + tools|length }}</span>
+                        </div>
+                        <div class="panel-body">
+                            {% if sites or tools %}
+                            <div class="project-list">
+                                {% for site in sites %}
+                                <div class="row">
+                                    <div class="row-title">{{ site.title }}</div>
+                                    <div class="row-meta">site · {{ site.site_type }} · <a href="{{ site.public_path }}">{{ site.site_id }}</a></div>
+                                </div>
+                                {% endfor %}
+                                {% for tool in tools %}
+                                <div class="row">
+                                    <div class="row-title">{{ tool.title }}</div>
+                                    <div class="row-meta">tool · {{ tool.tool_type }} · <a href="{{ tool.public_path }}">{{ tool.tool_id }}</a></div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="empty">Артефакты появятся после /create_site и /create_tool.</div>
+                            {% endif %}
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
                             <h3>Проекты</h3>
                             <span class="pill info">{{ projects|length }}</span>
                         </div>
@@ -538,8 +620,8 @@
 
                     <article class="panel">
                         <div class="panel-head">
-                            <h3>Models</h3>
-                            <span class="pill info">keys</span>
+                            <h3>Brain + Models</h3>
+                            <span class="pill info">{{ brain_status.provider }}</span>
                         </div>
                         <div class="panel-body">
                             <div class="compact-grid">
@@ -549,9 +631,35 @@
                                     <strong>{{ 'set' if enabled else 'empty' }}</strong>
                                 </div>
                                 {% endfor %}
+                                <div class="kv"><span>brain provider</span><strong>{{ brain_status.provider }}</strong></div>
+                                <div class="kv"><span>cheap model</span><strong>{{ brain_status.cheap_model }}</strong></div>
+                                <div class="kv"><span>strong model</span><strong>{{ brain_status.strong_model }}</strong></div>
+                                <div class="kv"><span>code model</span><strong>{{ brain_status.code_model }}</strong></div>
                             </div>
                             {% if database_error %}
                             <div class="empty">DB error: {{ database_error }}</div>
+                            {% endif %}
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Память</h3>
+                            <span class="pill info">{{ recent_memory|length }}</span>
+                        </div>
+                        <div class="panel-body">
+                            {% if recent_memory %}
+                            <div class="project-list">
+                                {% for item in recent_memory %}
+                                <div class="row">
+                                    <div class="row-title">{{ item.kind }}</div>
+                                    <div class="row-meta">{{ item.created_at }}</div>
+                                    <div class="row-meta">{{ item.content }}</div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="empty">Память появится после сообщений вида “запомни: …”.</div>
                             {% endif %}
                         </div>
                     </article>
