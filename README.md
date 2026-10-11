@@ -1,152 +1,133 @@
-# AI Office — личный автономный AI office
+# 🏢 AI Office — Личный автономный виртуальный офис ИИ-сотрудников
 
-Мультиагентная FastAPI-система из 7 ИИ-сотрудников с Telegram-интерфейсом, RAG/knowledge-слоем и первым autonomous runtime. Текущий уровень: личный 24/7 MVP/autonomous core, а не enterprise worker-платформа.
+**AI Office** — распределенная агентная платформа на базе FastAPI, объединяющая команду из 7 специализированных автономных ИИ-сотрудников. Система управляется через Telegram, Web UI или REST API, решая сквозные задачи бизнеса: от генерации маркетинговых воронок и анализа конкурентов до написания кода, создания рабочих прототипов и ведения финансового учета.
 
-## Архитектура
+---
 
+## 📌 Штат виртуального офиса (7 ИИ-сотрудников)
+
+1. **CEO / PMO Agent**:
+   - Декомпозиция входящих целей бизнеса на спринты и эпики.
+   - Назначение исполнителей, контроль дедлайнов и согласование промежуточных фаз.
+2. **Product Manager (PM)**:
+   - Анализ пользовательских сценариев, формулирование Customer Journey Map (CJM) и составление детальных ТЗ.
+3. **Developer (Fullstack Engineer)**:
+   - Генерация готового кода, прототипов сайтов, скриптов автоматизации, верстка в HTML/JS/CSS.
+4. **Data & Market Analyst**:
+   - Сбор открытых данных, анализ рыночных ниш, юнит-экономики и расчет CAC/LTV.
+5. **Copywriter & Marketer**:
+   - Разработка контент-планов, создание рекламных креативов, SEO-статей и рассылок.
+6. **QA / Reviewer Agent**:
+   - Автоматическая проверка сгенерированных текстов и кода на соответствие ТЗ, синтаксис и галлюцинации.
+7. **Ops & Support Agent**:
+   - Подготовка клиентских скриптов ответов, ведение документации и отслеживание операционных расходов токенов.
+
+---
+
+## 🏗 Архитектура и сквозной Data Flow
+
+```mermaid
+graph TD
+    Client[Telegram / Web / REST API] --> Router[LLM Gateway & Intent Router]
+    
+    subgraph Cognitive Core
+        Router --> TaskLifecycle[Task Lifecycle Engine]
+        TaskLifecycle --> GoalEngine[Goal & OKR Tracker]
+        TaskLifecycle --> EpisodicMemory[(Vector Memory & RAG)]
+        TaskLifecycle --> ActionPolicy[Action & Safety Policy]
+    end
+    
+    subgraph Agents Swarm
+        TaskLifecycle --> PMO[CEO / PMO Agent]
+        PMO --> Dev[Developer Agent]
+        PMO --> Analyst[Analyst Agent]
+        PMO --> Marketer[Marketing Agent]
+        PMO --> QA[QA Auditor Agent]
+    end
+    
+    subgraph Execution & Tools
+        Dev --> Tools[Tool Execution Sandbox: Web Search, File I/O, Code Run]
+        QA --> Workspace[Generated Artifacts & Sites: /dist/]
+    end
+    
+    Workspace --> Client
 ```
-Telegram / Web / API
-  -> PMO / agent routing
-  -> Task Engine
-  -> SQLAlchemy DB (PostgreSQL or local SQLite)
-  -> Autonomous scheduler
-  -> Safe action policy + approvals
-```
 
-## Быстрый старт
+---
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Заполнить Telegram webhook secret, whitelist и LLM keys
-alembic upgrade head
-python run.py
-```
+## 🛠 Технические характеристики и стек
 
-Проверка:
+| Слой | Стек | Описание |
+|---|---|---|
+| **Бэкенд Сервер** | Python 3.11+, FastAPI, Uvicorn | Высокоскоростной асинхронный REST API |
+| **LLM Модели** | OpenAI GPT-4o / Claude 3.5 Sonnet / Gemini Pro | Мультимодельная маршрутизация (`llm_router.py`) |
+| **Память и RAG** | Векторные эмбеддинги, Семантический поиск | Персистентный контекст диалогов и корпоративная база знаний |
+| **Управление задачами** | `task_lifecycle.py`, Event Bus (`agent_events.py`) | FSM управления жизненным циклом бизнес-задач |
+| **Управление пакетами** | `uv`, `pyproject.toml`, `requirements.txt` | Мгновенный детерминированный резолв зависимостей |
+| **Деплой** | `render.yaml` (Render Cloud), Docker | Конфигурация облачного хостинга |
 
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/api/autonomous/status
-```
+---
 
-## Агенты
-
-PMO, Developer, DataAnalyst, Copywriter, Support, Strategist и Accountant. Модели берутся из `config/settings.yaml` и env, поэтому код не привязан жестко к одному провайдеру.
-
-Агенты могут получать read-only публичный web-контекст для актуальных задач
-(`latest`, `сегодня`, новости, цены, docs, release notes, рынок, законы), если
-включено:
+## 📁 Структура каталогов
 
 ```text
-AI_OFFICE_WEB_ACCESS_ENABLED=true
+ai-office/
+├── core/
+│   ├── action_policy.py    # Политики допустимых действий и ограничений агентов
+│   ├── agent_events.py     # Шина событий агентов (Event-driven архитектура)
+│   ├── agent_profiles.py   # Промпты, роли, экспертиза и системные инструкции 7 агентов
+│   ├── auth.py             # Аутентификация запросов и безопасность сессий
+│   ├── chat_history.py     # Сессионное хранение переписки и цепочек рассуждений
+│   ├── db.py & models.py   # Модели базы данных задач, целей и агентов
+│   ├── llm_router.py       # Маршрутизатор запросов между OpenAI, Anthropic и локальными моделями
+│   ├── task_lifecycle.py   # Контроллер переходов статусов задач (New -> In Progress -> Done)
+│   └── state.py            # Централизованный стейт офиса
+├── memory/                 # Модули RAG, эмбеддинги и персистентное векторное хранилище
+├── tools/                  # Инструменты агентов: поиск в DuckDuckGo/Google, парсинг, запуск bash
+├── evals/                  # Бенчмарки и юнит-тесты качества решений агентов
+├── config/                 # Конфигурационные файлы окружения
+├── dist/                   # Выходные файлы, сгенерированные сайты и презентации
+├── office.py               # Основной сервис FastAPI приложения
+├── run.py                  # CLI точка входа
+├── AI_Office_business_case.md # Анализ бизнес-кейса, окупаемости и юнит-экономики
+└── P1_DELIVERY_REPORT.md   # Формальный отчет сдачи этапа MVP P1
 ```
 
-Web access не дает агентам право логиниться, отправлять формы, покупать,
-деплоить или делать write-действия. Это только поиск/чтение публичных страниц.
+---
 
-## Структура проекта
+## ⚙️ Переменные окружения (`.env`)
 
-```
-ai_office/
-├── agents/          # Классы агентов
-├── api/             # Product API и autonomous runtime API
-├── core/            # Auth, DB, модели, schemas, LLM router, config
-├── services/        # Projects/tasks/approvals/autonomy/tools services
-├── prompts/         # System prompts (YAML)
-├── tools/           # MCP-инструменты (Slack, Jira, GitHub, ERP)
-├── rag/             # Векторная БД (pgvector / Pinecone)
-├── knowledge/       # Исходные документы для изолированных RAG namespaces
-├── memory/          # Long-term memory store
-├── scripts/         # Служебные команды, включая ingest_knowledge.py
-├── orchestrator.py  # LangGraph StateGraph
-├── config/          # Настройки (YAML)
-└── requirements.txt
+```ini
+# Ключи провайдеров искусственного интеллекта
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Интеграция с Telegram
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_ADMIN_CHAT_ID=...
+
+# Конфигурация сервера
+PORT=8000
+HOST=0.0.0.0
+ENVIRONMENT=production
+VECTOR_STORE_PATH=./memory/vector_db
 ```
 
-## Обучение агентов
+---
 
-Источники знаний описаны в `config/knowledge_sources.yaml`. Каждый агент индексируется в отдельный namespace, а общая корпоративная память хранится отдельно в `common_corporate`.
+## 🚀 Команды запуска и разработки
 
 ```bash
-python3 scripts/ingest_knowledge.py --agent all --include-common --dry-run
-python3 scripts/ingest_knowledge.py --agent pmo --include-common
-```
+cd ai-office
 
-Подробная программа обучения: `docs/AGENT_TRAINING_PLAN.md`.
+# 1. Активация виртуального окружения через uv
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 
-Для локального smoke-прогона без Postgres используется `local_json` backend:
+# 2. Локальный запуск сервера
+python run.py
 
-```bash
-python3 scripts/ingest_knowledge.py --agent all --include-common
-python3 scripts/smoke_first_task.py
-```
-
-Если API-ключи еще не настроены, можно проверить только маршрутизацию и RAG:
-
-```bash
-python3 scripts/smoke_first_task.py --route-only
-```
-
-## Product API
-
-В личном режиме `AI_OFFICE_REQUIRE_API_KEY=false`, поэтому `X-API-Key` не нужен:
-
-```bash
-curl -X POST http://localhost:8000/api/office/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","agent_id":"pmo"}'
-```
-
-Для публичного сервера можно включить `AI_OFFICE_REQUIRE_API_KEY=true` и
-передавать `X-API-Key: <AI_OFFICE_API_KEY>`.
-
-Проверить только маршрут и RAG без LLM-вызова:
-
-```bash
-curl -X POST http://localhost:8000/api/office/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"task":"Напиши короткий пост о запуске ИИ-офиса","route_only":true}'
-```
-
-## Autonomous Runtime
-
-Новый слой хранит `projects`, `tasks`, `task_events`, `agent_runs`, `approvals`, `memories` и `tool_runs` в базе. Локально используется `sqlite:///data/ai_office.db`; для 24/7 лучше PostgreSQL через `DATABASE_URL`.
-
-Для persistent deployment используйте Alembic:
-
-```bash
-alembic upgrade head
-```
-
-`init_db()` остается fallback-ом для локальных smoke-прогонов и тестов. Новую миграцию позже можно создать так:
-
-```bash
-alembic revision --autogenerate -m "describe_change"
-alembic upgrade head
-```
-
-Основные endpoints:
-
-```bash
-curl http://localhost:8000/api/projects
-curl -X POST -H "Content-Type: application/json" \
-  http://localhost:8000/api/projects \
-  -d '{"slug":"ai-office","name":"AI Office","goal":"24/7 autonomous core"}'
-curl -X POST http://localhost:8000/api/autonomy/daily-plan
-```
-
-Telegram-команды: `/tasks`, `/tasks today`, `/projects`, `/project ai-office`, `/plan`, `/approve <id>`, `/reject <id>`, `/autonomy status`, `/autonomy on`, `/autonomy off`.
-
-Автоматически разрешены read-only проверки, планирование, task/status updates, draft results и подготовка patch/prompt. Deploy, push/merge, удаление файлов, env/secrets, CRM/email/money actions и произвольные shell-команды требуют approval. Pending approvals истекают по `AI_OFFICE_APPROVAL_TTL_HOURS`; stuck/failed задачи ограничены retry budget через `AI_OFFICE_TASK_MAX_RETRIES`.
-
-Подробнее: `docs/AUTONOMOUS_RUNTIME.md`, `docs/SECURITY.md`, `docs/TELEGRAM_COMMANDS.md`.
-
-## Тесты
-
-```bash
-python -m pytest -q
-ruff check .
+# 3. Запуск тестов качества и эвалов
+pytest evals/
 ```

@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 .venv/
 venv/
 __pycache__/
@@ -14,6 +15,10 @@ __pycache__/
 data/
 reports/
 workspaces/
+logs/
+generated_sites/
+generated_tools/
+dist/
 *.db
 *.sqlite
 *.sqlite3

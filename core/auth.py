@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import Header, HTTPException, Request, status
+import hmac
+from collections.abc import Callable
 
-from core.config import get_settings
+from fastapi import Depends, Header, HTTPException, Request, status
+
+from core.config import Environment, get_settings
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -46,6 +49,134 @@ async def require_api_key(
     request.state.api_auth_mode = "api_key"
 
 
+async def require_admin(
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> None:
+    """Require the dedicated admin token for admin and dangerous routes."""
+    settings = get_settings()
+    expected = settings.ai_office_admin_token.strip()
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI_OFFICE_ADMIN_TOKEN is not configured.",
+        )
+
+    provided = (x_admin_token or "").strip() or _extract_bearer_token(authorization)
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing admin token.",
+        )
+
+    request.state.current_user = {"id": "admin-token", "role": "owner"}
+    request.state.admin_authenticated = True
+
+
 def parse_id_allowlist(raw_value: str) -> set[str]:
     """Parse comma-separated Telegram ids into strings."""
     return {item.strip() for item in raw_value.split(",") if item.strip()}
+
+
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "owner": {
+        "task:create",
+        "task:read",
+        "task:cancel",
+        "approval:read",
+        "approval:decide",
+        "audit:read",
+        "knowledge:upload",
+        "knowledge:read",
+        "integration:manage",
+        "cost:read",
+    },
+    "admin": {
+        "task:create",
+        "task:read",
+        "task:cancel",
+        "approval:read",
+        "approval:decide",
+        "audit:read",
+        "knowledge:upload",
+        "knowledge:read",
+        "cost:read",
+    },
+    "manager": {"task:create", "task:read", "approval:read", "approval:decide", "audit:read", "cost:read"},
+    "operator": {"task:create", "task:read", "approval:read", "knowledge:read"},
+    "viewer": {"task:read", "approval:read", "audit:read", "knowledge:read", "cost:read"},
+    "agent_service": {"task:create", "task:read", "knowledge:read"},
+}
+
+
+async def get_current_user(
+    request: Request,
+    x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
+) -> dict[str, str]:
+    """Return a dev-safe user identity from headers.
+
+    In local development, missing headers resolve to an owner user so the app
+    remains easy to run. Tests can pass `X-User-Role: viewer` to verify denial.
+    Production does not trust request role headers; admin routes must use
+    `require_admin`.
+    """
+    settings = get_settings()
+    if settings.environment == Environment.PRODUCTION:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated production identity is required.",
+        )
+
+    role = (x_user_role or "owner").strip().lower()
+    if role not in ROLE_PERMISSIONS:
+        role = "viewer"
+    user = {"id": (x_user_id or "dev-user").strip(), "role": role}
+    request.state.current_user = user
+    return user
+
+
+def require_permission(permission: str) -> Callable:
+    async def dependency(user: dict[str, str] = Depends(get_current_user)) -> None:
+        role = user.get("role", "viewer")
+        if permission not in ROLE_PERMISSIONS.get(role, set()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing permission: {permission}",
+            )
+
+    return dependency
+
+
+def require_admin_or_permission(permission: str) -> Callable:
+    """Require admin token in production, role permission in development/staging."""
+
+    async def dependency(
+        request: Request,
+        authorization: str | None = Header(default=None, alias="Authorization"),
+        x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+        x_user_role: str | None = Header(default=None, alias="X-User-Role"),
+    ) -> None:
+        settings = get_settings()
+        if settings.environment == Environment.PRODUCTION:
+            await require_admin(request, authorization=authorization, x_admin_token=x_admin_token)
+            return
+
+        expected_admin_token = settings.ai_office_admin_token.strip()
+        provided_admin_token = (x_admin_token or "").strip() or _extract_bearer_token(authorization)
+        if expected_admin_token and hmac.compare_digest(provided_admin_token, expected_admin_token):
+            request.state.current_user = {"id": "admin-token", "role": "owner"}
+            request.state.admin_authenticated = True
+            return
+
+        user = await get_current_user(request, x_user_id=x_user_id, x_user_role=x_user_role)
+        role = user.get("role", "viewer")
+        if permission not in ROLE_PERMISSIONS.get(role, set()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing permission: {permission}",
+            )
+
+    return dependency

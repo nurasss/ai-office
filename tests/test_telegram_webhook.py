@@ -234,6 +234,40 @@ def test_pmo_routes_general_message_to_agent_topic(tmp_path, monkeypatch):
     )
 
 
+def test_pmo_routed_empty_agent_response_uses_fallback(tmp_path, monkeypatch):
+    class EmptyAgent:
+        max_tokens = 8192
+
+        async def process_task(self, message: str, **kwargs):
+            return ""
+
+    sent_messages: list[dict[str, object]] = []
+
+    async def fake_send(chat_id, text, **kwargs):
+        sent_messages.append({"chat_id": str(chat_id), "text": text, **kwargs})
+        return True
+
+    monkeypatch.setattr(web_app, "chat_store", ChatHistoryStore(tmp_path))
+    monkeypatch.setattr(
+        web_app,
+        "_agents",
+        {"pmo": FakePMOAgent("strategist"), "strategist": EmptyAgent()},
+    )
+    monkeypatch.setattr(web_app, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(web_app, "send_telegram_message_to", fake_send)
+
+    client = TestClient(web_app.app)
+    response = client.post(
+        "/api/telegram/webhook",
+        json=telegram_update("проведите анализ рынка закупок по подземной вспомогательной технике"),
+        headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
+    )
+
+    assert response.status_code == 200
+    assert not any("PMO не смог маршрутизировать" in str(message["text"]) for message in sent_messages)
+    assert any("fallback ответа" in str(message["text"]) for message in sent_messages)
+
+
 def test_pmo_ignores_specialist_topic_plain_message(tmp_path, monkeypatch):
     class TopicSettings(FakeSettings):
         telegram_general_thread_id = "1"

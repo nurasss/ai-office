@@ -46,6 +46,38 @@ def test_web_agent_runner_forces_plain_text_model(monkeypatch, tmp_path):
     reset_db_engine()
 
 
+def test_web_agent_runner_falls_back_on_empty_text(monkeypatch, tmp_path):
+    class EmptyAgent:
+        max_tokens = 8192
+
+        async def process_task(self, task, **kwargs):
+            return ""
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'empty_text.db'}")
+    web_app.get_settings.cache_clear()
+    reset_db_engine()
+    init_db()
+    monkeypatch.setattr(web_app, "get_agent", lambda agent_id: EmptyAgent())
+
+    result = asyncio.run(
+        web_app.run_agent_text_task(
+            "strategist",
+            "проведите анализ рынка закупок по подземной вспомогательной технике",
+        )
+    )
+
+    assert result["task_id"].startswith("web_")
+    assert "fallback ответа" in result["result"]
+    assert "подземной вспомогательной технике" in result["result"]
+    with get_session() as db:
+        tasks = TaskService(db).list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].status == "completed"
+
+    reset_db_engine()
+    web_app.get_settings.cache_clear()
+
+
 def test_web_agent_runner_persists_runtime_task(monkeypatch, tmp_path):
     class FakeAgent:
         async def process_task(self, task, **kwargs):

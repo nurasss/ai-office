@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 ProjectStatus = Literal["active", "paused", "archived"]
 TaskStatus = Literal[
     "planned",
+    "pending",
     "queued",
     "running",
     "waiting_approval",
@@ -65,13 +66,17 @@ class ProjectRead(BaseModel):
 
 
 class TaskCreate(BaseModel):
+    workspace_id: str = "default"
     project_slug: str | None = None
     project_id: int | None = None
     title: str = Field(min_length=1, max_length=255)
+    input_text: str = ""
     description: str = ""
     created_by: Literal["user", "pmo", "scheduler", "agent"] = "user"
     assigned_agent: AgentId = "pmo"
+    agent_hint: AgentId | None = None
     status: TaskStatus = "planned"
+    risk_level: Literal["safe", "low", "medium", "high", "critical"] = "safe"
     priority: int = Field(default=3, ge=1, le=5)
     requires_approval: bool = False
     due_at: datetime | None = None
@@ -89,12 +94,16 @@ class TaskRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    task_id: str
+    workspace_id: str | None
     project_id: int | None
     title: str
+    input_text: str
     description: str
     created_by: str
     assigned_agent: str
     status: str
+    risk_level: str
     priority: int
     requires_approval: bool
     retry_count: int
@@ -132,11 +141,19 @@ class TaskEventRead(BaseModel):
 
 
 class AgentRunRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
     id: int
+    task_run_id: int | None = None
     task_id: int | None
     agent_id: str
+    agent_name: str = ""
+    model_provider: str = ""
+    model_name: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    latency_ms: int = 0
     status: str
     input: dict[str, Any]
     output: dict[str, Any] | None
@@ -159,8 +176,14 @@ class ApprovalRead(BaseModel):
 
     id: int
     task_id: int | None
+    tool_call_id: int | None = None
     action_type: str
+    tool_name: str = ""
+    risk_level: str = ""
     summary: str
+    reason: str = ""
+    arguments_json: dict[str, Any] = Field(default_factory=dict)
+    dry_run_result: dict[str, Any] = Field(default_factory=dict)
     payload: dict[str, Any]
     status: str
     requested_by_agent: str
@@ -174,11 +197,73 @@ class ApprovalDecision(BaseModel):
     message: str = ""
 
 
+class TaskRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    total_cost_usd: float
+    total_input_tokens: int
+    total_output_tokens: int
+    error_message: str | None
+    trace_id: str
+
+
+class ToolCallRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int | None
+    task_run_id: int | None
+    agent_run_id: int | None
+    tool_name: str
+    arguments_json: dict[str, Any]
+    result_json: dict[str, Any] | None
+    status: str
+    risk_level: str
+    requires_approval: bool
+    approval_id: int | None
+    idempotency_key: str
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class AuditEventRead(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
+
+    id: int
+    workspace_id: str | None
+    task_id: int | None
+    actor_type: str
+    actor_id: str
+    action: str
+    object_type: str
+    object_id: str
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="metadata_json",
+        serialization_alias="metadata",
+    )
+    created_at: datetime
+
+
+class TaskCreateResponse(BaseModel):
+    task_id: str
+    status: str
+
+
 class PMOTaskPlanItem(BaseModel):
     title: str
     description: str = ""
     assigned_agent: AgentId = "pmo"
     priority: int = Field(default=3, ge=1, le=5)
+    depends_on: list[str] = Field(default_factory=list)
     requires_approval: bool = False
     base_agent: str | None = None
     profile_id: str | None = None

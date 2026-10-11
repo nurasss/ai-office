@@ -284,7 +284,7 @@ class BaseAgent(ABC):
             additional_kwargs=getattr(response, "additional_kwargs", {}),
         )
 
-        retry_max_tokens = max(max_tokens or self.max_tokens, 2400)
+        retry_max_tokens = max(max_tokens or 0, self.max_tokens, 2400)
         retry_messages = [
             *messages,
             HumanMessage(
@@ -311,6 +311,35 @@ class BaseAgent(ABC):
             response_metadata=getattr(retry_response, "response_metadata", {}),
             additional_kwargs=getattr(retry_response, "additional_kwargs", {}),
         )
+        return self._build_empty_response_fallback(messages)
+
+    def _build_empty_response_fallback(self, messages: list[BaseMessage]) -> str:
+        """Return a deterministic answer when the provider produced no visible text."""
+        task = self._extract_task_from_messages(messages)
+        return (
+            "Live-модель дважды вернула пустой текст, поэтому включен локальный fallback.\n\n"
+            f"Задача: {task or 'не распознана'}\n\n"
+            "Что можно сделать дальше:\n"
+            "1. Проверить, что у выбранной модели достаточно output-токенов и доступ к API активен.\n"
+            "2. Повторить запрос после перезапуска сервера, чтобы применились свежие настройки.\n"
+            "3. Если нужен фактический отчет, передать источники или включить web/RAG-контекст; "
+            "без источников агент не будет выдумывать рыночные данные."
+        )
+
+    @staticmethod
+    def _extract_task_from_messages(messages: list[BaseMessage]) -> str:
+        """Extract the final user task from the prompt messages for fallbacks."""
+        for message in reversed(messages):
+            content = BaseAgent._stringify_response_content(getattr(message, "content", ""))
+            text = content.strip()
+            if not text:
+                continue
+            marker = "Выполни задачу:"
+            if marker in text:
+                text = text.split(marker, 1)[1].strip()
+            if len(text) > 500:
+                text = f"{text[:500].rstrip()}..."
+            return text
         return ""
 
     async def _build_operational_context(self, task: str) -> str:

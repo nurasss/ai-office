@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.action_policy import classify_task
 from core.config import get_settings
-from core.models import AgentRun, Approval, Task, TaskEvent, utc_now
+from core.models import AgentRun, Approval, Task, TaskEvent, Workspace, utc_now
 from core.schemas import TaskCreate, TaskEventCreate
 from core.task_lifecycle import (
     OPEN_TASK_STATUSES,
@@ -31,6 +31,7 @@ class TaskService:
         self.db = db
 
     def create_task(self, payload: TaskCreate) -> Task:
+        self._ensure_workspace(payload.workspace_id)
         project_id = payload.project_id
         if payload.project_slug:
             project = ProjectService(self.db).get_project_by_slug(payload.project_slug)
@@ -38,12 +39,15 @@ class TaskService:
                 project_id = project.id
 
         task = Task(
+            workspace_id=payload.workspace_id,
             project_id=project_id,
             title=payload.title,
-            description=payload.description,
+            input_text=payload.input_text or payload.description or payload.title,
+            description=payload.description or payload.input_text,
             created_by=payload.created_by,
-            assigned_agent=payload.assigned_agent,
+            assigned_agent=payload.agent_hint or payload.assigned_agent,
             status=payload.status,
+            risk_level=payload.risk_level,
             priority=payload.priority,
             requires_approval=payload.requires_approval,
             due_at=payload.due_at,
@@ -68,6 +72,16 @@ class TaskService:
         self.db.commit()
         self.db.refresh(task)
         return task
+
+    def _ensure_workspace(self, workspace_id: str | None = None) -> Workspace:
+        workspace_key = (workspace_id or "default").strip() or "default"
+        workspace = self.db.get(Workspace, workspace_key)
+        if workspace:
+            return workspace
+        workspace = Workspace(id=workspace_key, name="Default workspace" if workspace_key == "default" else workspace_key)
+        self.db.add(workspace)
+        self.db.flush()
+        return workspace
 
     def list_tasks(
         self,

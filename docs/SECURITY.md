@@ -50,6 +50,20 @@ Telegram webhook is public only at the network level; it requires the Telegram
 secret header and whitelist. Keep `AI_OFFICE_REQUIRE_API_KEY=true` on any
 public deployment where `/api/*` is reachable by other people.
 
+## Admin Auth
+
+Production does not trust `X-User-ID` or `X-User-Role` headers. Admin pages,
+approval decisions, metrics/costs, knowledge upload, Telegram notify, and
+autonomy control require:
+
+```text
+AI_OFFICE_ADMIN_TOKEN=replace-with-long-random-value
+Authorization: Bearer <AI_OFFICE_ADMIN_TOKEN>
+```
+
+Development tests can still use role headers, but production identity must come
+from a real secret-backed path.
+
 ## Telegram Security
 
 Required:

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 *.env.local
 *.env.secret
 *.env.prod
@@ -11,6 +12,7 @@
 # ─── Python ───────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 *.egg-info/
 dist/
@@ -31,18 +33,29 @@ venv/
 
 # ─── OS ───────────────────────────────────────────────────────────────
 .DS_Store
+__MACOSX/
 Thumbs.db
 
 # ─── Local platforms / runtime data ───────────────────────────────────
 .vercel/
-data/
+data/local/*
+data/chat_history/*
+data/memory/*
+data/raw_knowledge/*
+data/vector_store/*.jsonl
+data/ai_office.db
+data/*.sqlite
+data/*.db
 reports/
 workspaces/
+logs/
+tmp/
+generated_sites/
+generated_tools/
 *.db
 *.sqlite
 *.sqlite3
+node_modules/
 reports.pdf
 *.zip
-reports/
-.vercel
 reports/

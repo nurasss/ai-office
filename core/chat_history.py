@@ -228,10 +228,11 @@ class ChatHistoryStore:
         try:
             from sqlalchemy import func, select
 
-            from core.db import get_session, init_db
+            from core.db import get_session, init_db, should_auto_create_tables
             from core.models import Conversation, Message
 
-            init_db()
+            if should_auto_create_tables():
+                init_db()
             with get_session() as db:
                 rows = db.execute(
                     select(
@@ -265,10 +266,11 @@ class ChatHistoryStore:
         title: str,
     ) -> dict[str, Any] | None:
         try:
-            from core.db import get_session, init_db
+            from core.db import get_session, init_db, should_auto_create_tables
             from core.models import Conversation
 
-            init_db()
+            if should_auto_create_tables():
+                init_db()
             with get_session() as db:
                 existing = db.query(Conversation).filter_by(external_id=conversation_id).first()
                 if existing:
@@ -289,10 +291,11 @@ class ChatHistoryStore:
         try:
             from sqlalchemy import select
 
-            from core.db import get_session, init_db
+            from core.db import get_session, init_db, should_auto_create_tables
             from core.models import Conversation, Message
 
-            init_db()
+            if should_auto_create_tables():
+                init_db()
             with get_session() as db:
                 conversation = db.query(Conversation).filter_by(external_id=conversation_id).first()
                 if not conversation:
@@ -316,10 +319,11 @@ class ChatHistoryStore:
         title: str | None = None,
     ) -> dict[str, Any] | None:
         try:
-            from core.db import get_session, init_db
+            from core.db import get_session, init_db, should_auto_create_tables
             from core.models import Conversation, utc_now
 
-            init_db()
+            if should_auto_create_tables():
+                init_db()
             with get_session() as db:
                 conversation = db.query(Conversation).filter_by(external_id=conversation_id).first()
                 if not conversation:
@@ -339,10 +343,11 @@ class ChatHistoryStore:
         message: ChatMessage,
     ) -> dict[str, Any] | None:
         try:
-            from core.db import get_session, init_db
+            from core.db import get_session, init_db, should_auto_create_tables
             from core.models import Conversation, Message, utc_now
 
-            init_db()
+            if should_auto_create_tables():
+                init_db()
             with get_session() as db:
                 conversation = db.query(Conversation).filter_by(external_id=conversation_id).first()
                 if not conversation:
@@ -394,10 +399,11 @@ class ChatHistoryStore:
         try:
             from sqlalchemy import select
 
-            from core.db import get_session, init_db
+            from core.db import get_session, init_db, should_auto_create_tables
             from core.models import Conversation, Message
 
-            init_db()
+            if should_auto_create_tables():
+                init_db()
             with get_session() as db:
                 conversation = db.query(Conversation).filter_by(external_id=conversation_id).first()
                 if not conversation:
