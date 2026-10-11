@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="30">
+    <title>AI Office — Operations</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #101113;
+            --panel: #17191d;
+            --panel-soft: #1f2228;
+            --line: #2d3138;
+            --text: #f3f4f6;
+            --muted: #9ca3af;
+            --green: #38b27d;
+            --amber: #e3a12f;
+            --red: #e25b5b;
+            --blue: #5b8def;
+            --cyan: #3db7c4;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: 0;
+        }
+
+        .shell {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 260px minmax(0, 1fr);
+        }
+
+        .sidebar {
+            border-right: 1px solid var(--line);
+            background: #14161a;
+            padding: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+        }
+
+        .brand {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 750;
+        }
+
+        .brand p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .nav-block {
+            border-top: 1px solid var(--line);
+            padding-top: 18px;
+        }
+
+        .nav-title {
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .command-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .command {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            color: #dbeafe;
+            background: #202936;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 8px 9px;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: block;
+            text-decoration: none;
+        }
+
+        .content {
+            min-width: 0;
+            padding: 24px;
+            display: grid;
+            gap: 18px;
+            align-content: start;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 18px;
+        }
+
+        .title h2 {
+            margin: 0 0 7px;
+            font-size: 28px;
+            line-height: 1.15;
+        }
+
+        .title p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .refresh {
+            color: var(--muted);
+            font-size: 12px;
+            padding-top: 7px;
+            white-space: nowrap;
+        }
+
+        .grid {
+            display: grid;
+            gap: 14px;
+        }
+
+        .stats {
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        }
+
+        .main-grid {
+            grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+            align-items: start;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-head {
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            border-bottom: 1px solid var(--line);
+            background: #1a1d22;
+        }
+
+        .panel-head h3 {
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .panel-body {
+            padding: 14px 16px;
+        }
+
+        .stat {
+            min-height: 112px;
+            padding: 15px;
+        }
+
+        .stat-label {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            font-size: 30px;
+            font-weight: 760;
+            line-height: 1;
+        }
+
+        .stat-note {
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            padding: 4px 9px;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .ok { color: #d1fae5; background: rgba(56, 178, 125, 0.15); }
+        .warn { color: #fef3c7; background: rgba(227, 161, 47, 0.16); }
+        .bad { color: #fee2e2; background: rgba(226, 91, 91, 0.16); }
+        .info { color: #dbeafe; background: rgba(91, 141, 239, 0.17); }
+        .idle { color: #e5e7eb; background: rgba(156, 163, 175, 0.15); }
+
+        .agent-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .agent {
+            border: 1px solid var(--line);
+            background: var(--panel-soft);
+            border-radius: 8px;
+            padding: 12px;
+            min-height: 106px;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+        }
+
+        .agent-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .agent-name {
+            font-size: 14px;
+            font-weight: 720;
+        }
+
+        .agent-role,
+        .agent-message,
+        .muted {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .task-list,
+        .project-list,
+        .approval-list {
+            display: grid;
+            gap: 9px;
+        }
+
+        .row {
+            border: 1px solid var(--line);
+            background: var(--panel-soft);
+            border-radius: 8px;
+            padding: 11px 12px;
+            display: grid;
+            gap: 7px;
+        }
+
+        .row-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .row-title {
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+
+        .row-meta {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .compact-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 9px;
+        }
+
+        .kv {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel-soft);
+            padding: 10px;
+        }
+
+        .kv span {
+            display: block;
+            color: var(--muted);
+            font-size: 11px;
+            margin-bottom: 5px;
+        }
+
+        .kv strong {
+            font-size: 13px;
+            overflow-wrap: anywhere;
+        }
+
+        .empty {
+            color: var(--muted);
+            font-size: 13px;
+            padding: 18px 0;
+        }
+
+        @media (max-width: 1040px) {
+            .shell { grid-template-columns: 1fr; }
+            .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+            .stats,
+            .main-grid,
+            .agent-grid { grid-template-columns: 1fr; }
+            .topbar { flex-direction: column; }
+            .refresh { white-space: normal; }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <h1>AI Office</h1>
+                <p>Операционный мониторинг. Рабочие команды, approvals и общение с агентами идут через Telegram.</p>
+            </div>
+
+            <div class="nav-block">
+                <div class="nav-title">Pages</div>
+                <div class="command-list">
+                    <a class="command" href="/dashboard">/dashboard</a>
+                    <a class="command" href="/agents">/agents</a>
+                    <a class="command" href="/goals">/goals</a>
+                    <a class="command" href="/tasks">/tasks</a>
+                    <a class="command" href="/sites">/sites</a>
+                    <a class="command" href="/tools">/tools</a>
+                    <a class="command" href="/memory">/memory</a>
+                    <a class="command" href="/landing">/landing</a>
+                </div>
+            </div>
+
+            <div class="nav-block">
+                <div class="nav-title">Telegram</div>
+                <div class="command-list">
+                    
+                    <div class="command">/status</div>
+                    
+                    <div class="command">/add_goal</div>
+                    
+                    <div class="command">/goals</div>
+                    
+                    <div class="command">/tasks</div>
+                    
+                    <div class="command">/tasks today</div>
+                    
+                    <div class="command">/daily_plan</div>
+                    
+                    <div class="command">/plan</div>
+                    
+                    <div class="command">/memory</div>
+                    
+                    <div class="command">/projects</div>
+                    
+                    <div class="command">/project ai-office</div>
+                    
+                    <div class="command">/create_site</div>
+                    
+                    <div class="command">/create_tool</div>
+                    
+                    <div class="command">/brain_status</div>
+                    
+                    <div class="command">/approve &lt;id&gt;</div>
+                    
+                    <div class="command">/reject &lt;id&gt;</div>
+                    
+                    <div class="command">/autonomy status</div>
+                    
+                </div>
+            </div>
+
+            <div class="nav-block">
+                <div class="nav-title">Состояние</div>
+                <div class="command-list">
+                    <div class="pill ok">DB online</div>
+                    <div class="pill warn">Telegram setup</div>
+                    <div class="pill idle">Autonomy off</div>
+                    <div class="pill idle">Scheduler stopped</div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="content">
+            <section class="topbar">
+                <div class="title">
+                    <h2>Operations Dashboard</h2>
+                    <p>Read-only обзор агентов, задач, проектов и approval-очереди.</p>
+                </div>
+                <div class="refresh">Автообновление каждые 30 секунд</div>
+            </section>
+
+            <section class="grid stats">
+                <article class="panel stat">
+                    <div class="stat-label">Открытые задачи</div>
+                    <div class="stat-value">1</div>
+                    <div class="stat-note">planned, queued, running, waiting approval</div>
+                </article>
+                <article class="panel stat">
+                    <div class="stat-label">Ждет approval</div>
+                    <div class="stat-value">2</div>
+                    <div class="stat-note">решение через /approve или /reject</div>
+                </article>
+                <article class="panel stat">
+                    <div class="stat-label">Завершено</div>
+                    <div class="stat-value">45</div>
+                    <div class="stat-note">безопасные draft/results</div>
+                </article>
+                <article class="panel stat">
+                    <div class="stat-label">Проблемы</div>
+                    <div class="stat-value">0</div>
+                    <div class="stat-note">failed или stuck</div>
+                </article>
+                <article class="panel stat">
+                    <div class="stat-label">Активные цели</div>
+                    <div class="stat-value">0</div>
+                    <div class="stat-note">goal engine backlog</div>
+                </article>
+                <article class="panel stat">
+                    <div class="stat-label">Артефакты</div>
+                    <div class="stat-value">0</div>
+                    <div class="stat-note">sites + tools</div>
+                </article>
+            </section>
+
+            <section class="grid main-grid">
+                <div class="grid">
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Агенты</h3>
+                            <span class="pill info">7 сотрудников</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="agent-grid">
+                                
+                                <div class="agent">
+                                    <div class="agent-top">
+                                        <div class="agent-name">PMO</div>
+                                        <span class="pill idle">idle</span>
+                                    </div>
+                                    <div class="agent-role">Оркестратор задач</div>
+                                    <div class="agent-message">Свободен</div>
+                                </div>
+                                
+                                <div class="agent">
+                                    <div class="agent-top">
+                                        <div class="agent-name">Аналитик</div>
+                                        <span class="pill idle">idle</span>
+                                    </div>
+                                    <div class="agent-role">Данные и метрики</div>
+                                    <div class="agent-message">Свободен</div>
+                                </div>
+                                
+                                <div class="agent">
+                                    <div class="agent-top">
+                                        <div class="agent-name">Разработчик</div>
+                                        <span class="pill idle">idle</span>
+                                    </div>
+                                    <div class="agent-role">Код и ревью</div>
+                                    <div class="agent-message">Свободен</div>
+                                </div>
+                                
+                                <div class="agent">
+                                    <div class="agent-top">
+                                        <div class="agent-name">Копирайтер</div>
+                                        <span class="pill idle">idle</span>
+                                    </div>
+                                    <div class="agent-role">Контент и документы</div>
+                                    <div class="agent-message">Свободен</div>
+                                </div>
+                                
+                                <div class="agent">
+                                    <div class="agent-top">
+                                        <div class="agent-name">Поддержка</div>
+                                        <span class="pill idle">idle</span>
+                                    </div>
+                                    <div class="agent-role">Тикеты и FAQ</div>
+                                    <div class="agent-message">Свободен</div>
+                                </div>
+                                
+                                <div class="agent">
+                                    <div class="agent-top">
+                                        <div class="agent-name">Стратег</div>
+                                        <span class="pill idle">idle</span>
+                                    </div>
+                                    <div class="agent-role">Рынок и roadmap</div>
+                                    <div class="agent-message">Свободен</div>
+                                </div>
+                                
+                                <div class="agent">
+                                    <div class="agent-top">
+                                        <div class="agent-name">Бухгалтер</div>
+                                        <span class="pill idle">idle</span>
+                                    </div>
+                                    <div class="agent-role">Финансы и документы</div>
+                                    <div class="agent-message">Свободен</div>
+                                </div>
+                                
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Открытые задачи</h3>
+                            <span class="pill info">1 на экране</span>
+                        </div>
+                        <div class="panel-body">
+                            
+                            <div class="task-list">
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#2 GitHub smoke write</div>
+                                            <div class="row-meta">none · developer · priority 3</div>
+                                        </div>
+                                        <span class="pill warn">waiting_approval</span>
+                                    </div>
+                                    
+                                </div>
+                                
+                            </div>
+                            
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Цели</h3>
+                            <span class="pill info">0</span>
+                        </div>
+                        <div class="panel-body">
+                            
+                            <div class="empty">Цели появятся после /add_goal.</div>
+                            
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Последние задачи</h3>
+                            <span class="pill info">12 на экране</span>
+                        </div>
+                        <div class="panel-body">
+                            
+                            <div class="task-list">
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#46 Второй вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:52</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Второй вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#45 Первый вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:52</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Первый вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#44 Второй вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:52</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Второй вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#43 Первый вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:52</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Первый вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#42 Второй вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:01</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Второй вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#41 Первый вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:01</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Первый вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#40 Второй вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:01</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Второй вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#39 Первый вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 17:01</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Первый вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#38 Второй вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 16:47</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Второй вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#37 Первый вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 16:47</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Первый вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#36 Второй вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 16:47</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Второй вопрос</div>
+                                    
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-main">
+                                        <div>
+                                            <div class="row-title">#35 Первый вопрос</div>
+                                            <div class="row-meta">telegram · copywriter · 2026-06-05 16:47</div>
+                                        </div>
+                                        <span class="pill ok">completed</span>
+                                    </div>
+                                    
+                                    <div class="row-meta">echo:Первый вопрос</div>
+                                    
+                                </div>
+                                
+                            </div>
+                            
+                        </div>
+                    </article>
+                </div>
+
+                <div class="grid">
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Scheduler</h3>
+                            <span class="pill idle">stopped</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="compact-grid">
+                                <div class="kv"><span>daily</span><strong>9:00</strong></div>
+                                <div class="kv"><span>review</span><strong>19:00</strong></div>
+                                <div class="kv"><span>poll</span><strong>1800 sec</strong></div>
+                                <div class="kv"><span>timezone</span><strong>Asia/Almaty</strong></div>
+                                <div class="kv"><span>last poll</span><strong>never</strong></div>
+                                <div class="kv"><span>last plan</span><strong>never</strong></div>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Approvals</h3>
+                            <span class="pill warn">2 pending</span>
+                        </div>
+                        <div class="panel-body">
+                            
+                            <div class="approval-list">
+                                
+                                <div class="row">
+                                    <div class="row-title">#2 github.issue.create</div>
+                                    <div class="row-meta">Approval required for github.issue.create</div>
+                                    <div class="row-meta">task 2 · developer</div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="row-title">#1 github.issue.create</div>
+                                    <div class="row-meta">Approval required for github.issue.create</div>
+                                    <div class="row-meta">task 2 · developer</div>
+                                </div>
+                                
+                            </div>
+                            
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Созданные сайты и tools</h3>
+                            <span class="pill info">0</span>
+                        </div>
+                        <div class="panel-body">
+                            
+                            <div class="empty">Артефакты появятся после /create_site и /create_tool.</div>
+                            
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Проекты</h3>
+                            <span class="pill info">0</span>
+                        </div>
+                        <div class="panel-body">
+                            
+                            <div class="empty">Проекты появятся после /plan или API seed.</div>
+                            
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Brain + Models</h3>
+                            <span class="pill info">fake</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="compact-grid">
+                                
+                                <div class="kv">
+                                    <span>OpenAI</span>
+                                    <strong>empty</strong>
+                                </div>
+                                
+                                <div class="kv">
+                                    <span>Anthropic</span>
+                                    <strong>empty</strong>
+                                </div>
+                                
+                                <div class="kv">
+                                    <span>Google</span>
+                                    <strong>empty</strong>
+                                </div>
+                                
+                                <div class="kv"><span>brain provider</span><strong>fake</strong></div>
+                                <div class="kv"><span>cheap model</span><strong>fake-cheap</strong></div>
+                                <div class="kv"><span>strong model</span><strong>fake-strong</strong></div>
+                                <div class="kv"><span>code model</span><strong>fake-code</strong></div>
+                            </div>
+                            
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <div class="panel-head">
+                            <h3>Память</h3>
+                            <span class="pill info">0</span>
+                        </div>
+                        <div class="panel-body">
+                            
+                            <div class="empty">Память появится после сообщений вида “запомни: …”.</div>
+                            
+                        </div>
+                    </article>
+                </div>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

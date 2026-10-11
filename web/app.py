@@ -460,6 +460,12 @@ async def run_agent_text_task(
     if not agent:
         raise ValueError(f"Неизвестный агент: {agent_id}")
 
+    agent_max_tokens = getattr(agent, "max_tokens", 2400) or 2400
+    try:
+        agent_max_tokens = int(agent_max_tokens)
+    except (TypeError, ValueError):
+        agent_max_tokens = 2400
+
     task_id = f"web_{uuid.uuid4().hex[:8]}"
     db_task_id: int | None = None
     try:
@@ -499,7 +505,7 @@ async def run_agent_text_task(
             message,
             chat_history=conversation_history or [],
             use_tools=False,
-            max_tokens=2400,
+            max_tokens=max(2400, agent_max_tokens),
         )
     except Exception:
         if db_task_id is not None:
@@ -528,31 +534,16 @@ async def run_agent_text_task(
         raise
     response_text = str(response_text or "").strip()
     if not response_text:
-        if db_task_id is not None:
-            try:
-                with get_session() as db:
-                    TaskService(db).update_status(
-                        db_task_id,
-                        "failed",
-                        message=f"Empty model response for external task {task_id}.",
-                    )
-            except Exception as persist_error:
-                logger.warning(
-                    "task.persistence.empty_status_failed",
-                    task_id=task_id,
-                    error=format_error(persist_error),
-                )
-        await publish_agent_status(
-            agent_id,
-            "error",
-            message="Модель вернула пустой ответ",
+        response_text = (
+            "Агент не вернул видимый текст, поэтому включен fallback ответа.\n\n"
+            f"Задача: {message.strip() or 'не распознана'}\n\n"
+            "Проверьте настройки модели/API и повторите запрос после перезапуска сервера. "
+            "Если задача требует фактического анализа, приложите источники или включите web/RAG-контекст."
+        )
+        logger.warning(
+            "task.empty_model_response.fallback",
             task_id=task_id,
-        )
-        asyncio.create_task(
-            reset_agent_status_later(agent_id, delay_seconds=4, task_id=task_id)
-        )
-        raise RuntimeError(
-            "Модель вернула пустой ответ. Попробуйте повторить запрос или проверить API-ключ модели."
+            agent_id=agent_id,
         )
 
     if db_task_id is not None:
